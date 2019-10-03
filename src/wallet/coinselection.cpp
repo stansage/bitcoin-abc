@@ -4,8 +4,8 @@
 
 #include <wallet/coinselection.h>
 
-#include <util.h>
-#include <utilmoneystr.h>
+#include <util/moneystr.h>
+#include <util/system.h>
 
 // Descending order comparator
 struct {
@@ -318,12 +318,14 @@ bool KnapsackSolver(const Amount nTargetValue, std::vector<OutputGroup> &groups,
 
         if (LogAcceptCategory(BCLog::SELECTCOINS)) {
             /* Continued */
-            LogPrint(BCLog::SELECTCOINS, "SelectCoins() best subset: ");
+            LogPrintToBeContinued(BCLog::SELECTCOINS,
+                                  "SelectCoins() best subset: ");
             for (size_t i = 0; i < applicable_groups.size(); i++) {
                 if (vfBest[i]) {
                     /* Continued */
-                    LogPrint(BCLog::SELECTCOINS, "%s ",
-                             FormatMoney(applicable_groups[i].m_value));
+                    LogPrintToBeContinued(
+                        BCLog::SELECTCOINS, "%s ",
+                        FormatMoney(applicable_groups[i].m_value));
                 }
             }
             LogPrint(BCLog::SELECTCOINS, "total %s\n", FormatMoney(nBest));

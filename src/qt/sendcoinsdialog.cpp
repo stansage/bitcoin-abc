@@ -204,16 +204,6 @@ void SendCoinsDialog::setModel(WalletModel *_model) {
         updateFeeSectionControls();
         updateMinFeeLabel();
         updateSmartFeeLabel();
-
-        // Cleanup old confirmation target related settings
-        // TODO: Remove these in 0.20
-        QSettings settings;
-        if (settings.value("nSmartFeeSliderPosition").toInt() != 0) {
-            settings.remove("nSmartFeeSliderPosition");
-        }
-        if (settings.value("nConfTarget").toInt() != 0) {
-            settings.remove("nConfTarget");
-        }
     }
 }
 
@@ -371,7 +361,7 @@ void SendCoinsDialog::on_sendButton_clicked() {
                 model->getOptionsModel()->getDisplayUnit(), totalAmount)));
     questionString.append(
         QString("<span style='font-size:10pt;font-weight:normal;'><br "
-                "/>(=%2)</span>")
+                "/>(=%1)</span>")
             .arg(alternativeUnits.join(" " + tr("or") + "<br />")));
 
     SendConfirmationDialog confirmationDialog(
@@ -402,6 +392,12 @@ void SendCoinsDialog::on_sendButton_clicked() {
 }
 
 void SendCoinsDialog::clear() {
+    // Clear coin control settings
+    CoinControlDialog::coinControl()->UnSelectAll();
+    ui->checkBoxCoinControlChange->setChecked(false);
+    ui->lineEditCoinControlChange->clear();
+    coinControlUpdateLabels();
+
     // Remove entries until only one left
     while (ui->entries->count()) {
         ui->entries->takeAt(0)->widget()->deleteLater();

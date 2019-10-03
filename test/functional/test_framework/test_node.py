@@ -6,6 +6,7 @@
 
 import contextlib
 import decimal
+from enum import Enum
 import errno
 import http.client
 import json
@@ -21,7 +22,6 @@ from .authproxy import JSONRPCException
 from .messages import COIN, CTransaction, FromHex
 from .util import (
     append_config,
-    assert_equal,
     delete_cookie_file,
     get_rpc_proxy,
     p2p_port,
@@ -37,6 +37,12 @@ BITCOIND_PROC_WAIT_TIMEOUT = 60
 
 class FailedToStartError(Exception):
     """Raised when a node fails to start correctly."""
+
+
+class ErrorMatch(Enum):
+    FULL_TEXT = 1
+    FULL_REGEX = 2
+    PARTIAL_REGEX = 3
 
 
 class TestNode():
@@ -75,7 +81,7 @@ class TestNode():
             append_config(datadir, extra_conf)
         # Most callers will just need to add extra args to the default list
         # below.
-        # For those callers that need more flexibity, they can access the
+        # For those callers that need more flexibility, they can access the
         # default args using the provided facilities.
         # Note that common args are set in the config file (see
         # initialize_datadir)
@@ -100,6 +106,14 @@ class TestNode():
         self.cleanup_on_exit = True
         self.p2ps = []
 
+    def _node_msg(self, msg: str) -> str:
+        """Return a modified msg that identifies this node by its index as a debugging aid."""
+        return "[node {}] {}".format(self.index, msg)
+
+    def _raise_assertion_error(self, msg: str):
+        """Raise an AssertionError with msg modified to identify this node."""
+        raise AssertionError(self._node_msg(msg))
+
     def __del__(self):
         # Ensure that we don't leave any bitcoind processes lying around after
         # the test ends
@@ -107,7 +121,7 @@ class TestNode():
             # Should only happen on test failure
             # Avoid using logger, as that may have already been shutdown when
             # this destructor is called.
-            print("Cleaning up leftover process")
+            print(self._node_msg("Cleaning up leftover process"))
             self.process.kill()
 
     def __getattr__(self, name):
@@ -115,8 +129,10 @@ class TestNode():
         if self.use_cli:
             return getattr(self.cli, name)
         else:
-            assert self.rpc is not None, "Error: RPC not initialized"
-            assert self.rpc_connected, "Error: No RPC connection"
+            assert self.rpc is not None, self._node_msg(
+                "Error: RPC not initialized")
+            assert self.rpc_connected, self._node_msg(
+                "Error: No RPC connection")
             return getattr(self.rpc, name)
 
     def clear_default_args(self):
@@ -170,8 +186,8 @@ class TestNode():
         poll_per_s = 4
         for _ in range(poll_per_s * self.rpc_timeout):
             if self.process.poll() is not None:
-                raise FailedToStartError(
-                    'bitcoind exited with status {} during initialization'.format(self.process.returncode))
+                raise FailedToStartError(self._node_msg(
+                    'bitcoind exited with status {} during initialization'.format(self.process.returncode)))
             try:
                 self.rpc = get_rpc_proxy(rpc_url(self.datadir, self.host, self.rpc_port),
                                          self.index, timeout=self.rpc_timeout, coveragedir=self.coverage_dir)
@@ -191,14 +207,16 @@ class TestNode():
                 if "No RPC credentials" not in str(e):
                     raise
             time.sleep(1.0 / poll_per_s)
-        raise AssertionError("Unable to connect to bitcoind")
+        self._raise_assertion_error("Unable to connect to bitcoind")
 
     def get_wallet_rpc(self, wallet_name):
         if self.use_cli:
             return self.cli("-rpcwallet={}".format(wallet_name))
         else:
-            assert self.rpc_connected
-            assert self.rpc
+            assert self.rpc is not None, self._node_msg(
+                "Error: RPC not initialized")
+            assert self.rpc_connected, self._node_msg(
+                "Error: RPC not connected")
             wallet_path = "wallet/{}".format(wallet_name)
             return self.rpc / wallet_path
 
@@ -233,7 +251,8 @@ class TestNode():
             return False
 
         # process has stopped. Assert that it didn't return an error code.
-        assert_equal(return_code, 0)
+        assert return_code == 0, self._node_msg(
+            "Node returned non-zero exit code ({}) when stopping".format(return_code))
         self.running = False
         self.process = None
         self.rpc_connected = False
@@ -262,7 +281,7 @@ class TestNode():
                     self._raise_assertion_error(
                         'Expected message "{}" does not partially match log:\n\n{}\n\n'.format(expected_msg, print_log))
 
-    def assert_start_raises_init_error(self, extra_args=None, expected_msg=None, partial_match=False, *args, **kwargs):
+    def assert_start_raises_init_error(self, extra_args=None, expected_msg=None, match=ErrorMatch.FULL_TEXT, *args, **kwargs):
         """Attempt to start the node and expect it to raise an error.
 
         extra_args: extra arguments to pass through to bitcoind
@@ -286,20 +305,24 @@ class TestNode():
                 if expected_msg is not None:
                     log_stderr.seek(0)
                     stderr = log_stderr.read().decode('utf-8').strip()
-                    if partial_match:
+                    if match == ErrorMatch.PARTIAL_REGEX:
                         if re.search(expected_msg, stderr, flags=re.MULTILINE) is None:
-                            raise AssertionError(
+                            self._raise_assertion_error(
                                 'Expected message "{}" does not partially match stderr:\n"{}"'.format(expected_msg, stderr))
-                    else:
+                    elif match == ErrorMatch.FULL_REGEX:
                         if re.fullmatch(expected_msg, stderr) is None:
-                            raise AssertionError(
+                            self._raise_assertion_error(
+                                'Expected message "{}" does not fully match stderr:\n"{}"'.format(expected_msg, stderr))
+                    elif match == ErrorMatch.FULL_TEXT:
+                        if expected_msg != stderr:
+                            self._raise_assertion_error(
                                 'Expected message "{}" does not fully match stderr:\n"{}"'.format(expected_msg, stderr))
             else:
                 if expected_msg is None:
                     assert_msg = "bitcoind should have exited with an error"
                 else:
                     assert_msg = "bitcoind should have exited with expected error " + expected_msg
-                raise AssertionError(assert_msg)
+                self._raise_assertion_error(assert_msg)
 
     def node_encrypt_wallet(self, passphrase):
         """"Encrypts the wallet.
@@ -330,7 +353,7 @@ class TestNode():
         ctx = FromHex(CTransaction(), self.getrawtransaction(txid))
         return self.calculate_fee(ctx)
 
-    def add_p2p_connection(self, p2p_conn, *args, **kwargs):
+    def add_p2p_connection(self, p2p_conn, *, wait_for_verack=True, **kwargs):
         """Add a p2p connection to the node.
 
         This method adds the p2p connection to the self.p2ps list and also
@@ -340,8 +363,10 @@ class TestNode():
         if 'dstaddr' not in kwargs:
             kwargs['dstaddr'] = '127.0.0.1'
 
-        p2p_conn.peer_connect(*args, **kwargs)
+        p2p_conn.peer_connect(**kwargs)()
         self.p2ps.append(p2p_conn)
+        if wait_for_verack:
+            p2p_conn.wait_for_verack()
 
         return p2p_conn
 
@@ -351,7 +376,7 @@ class TestNode():
 
         Convenience property - most tests only use a single p2p connection to each
         node, so this saves having to write node.p2ps[0] many times."""
-        assert self.p2ps, "No p2p connection"
+        assert self.p2ps, self._node_msg("No p2p connection")
         return self.p2ps[0]
 
     def disconnect_p2ps(self):

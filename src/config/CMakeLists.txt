@@ -11,10 +11,10 @@ include(CheckCXXSourceCompiles)
 set(PACKAGE_NAME "Bitcoin ABC" CACHE STRING "Package name")
 
 # Version
-set(CLIENT_VERSION_MAJOR 0 CACHE STRING "Major version number")
-set(CLIENT_VERSION_MINOR 20 CACHE STRING "Minor version number")
-set(CLIENT_VERSION_REVISION 1 CACHE STRING "Revision version number")
-set(CLIENT_VERSION_BUILD 0 CACHE STRING "Build version number")
+set(CLIENT_VERSION_MAJOR ${bitcoin-abc_VERSION_MAJOR} CACHE STRING "Major version number")
+set(CLIENT_VERSION_MINOR ${bitcoin-abc_VERSION_MINOR} CACHE STRING "Minor version number")
+set(CLIENT_VERSION_REVISION ${bitcoin-abc_VERSION_PATCH} CACHE STRING "Revision version number")
+set(CLIENT_VERSION_BUILD ${bitcoin-abc_VERSION_TWEAK} CACHE STRING "Build version number")
 
 option(CLIENT_VERSION_IS_RELEASE "Build a release version" OFF)
 
@@ -158,6 +158,18 @@ check_cxx_source_compiles("
         return 0;
     }
 " CHAR_EQUALS_INT8)
+
+check_cxx_source_compiles("
+    __attribute__((visibility(\"default\"))) int main() {
+        return 0;
+    }
+" HAVE_FUNC_ATTRIBUTE_VISIBILITY)
+
+check_cxx_source_compiles("
+    __declspec(dllexport) int main() {
+        return 0;
+    }
+" HAVE_FUNC_ATTRIBUTE_DLLEXPORT)
 
 # OpenSSL functionality
 set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_CRYPTO_INCLUDES})

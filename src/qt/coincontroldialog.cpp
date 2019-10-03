@@ -137,10 +137,6 @@ CoinControlDialog::CoinControlDialog(const PlatformStyle *_platformStyle,
     connect(ui->pushButtonSelectAll, SIGNAL(clicked()), this,
             SLOT(buttonSelectAllClicked()));
 
-    // change coin control first column label due Qt4 bug.
-    // see https://github.com/bitcoin/bitcoin/issues/5716
-    ui->treeWidget->headerItem()->setText(COLUMN_CHECKBOX, QString());
-
     ui->treeWidget->setColumnWidth(COLUMN_CHECKBOX, 84);
     ui->treeWidget->setColumnWidth(COLUMN_AMOUNT, 110);
     ui->treeWidget->setColumnWidth(COLUMN_LABEL, 190);
@@ -233,8 +229,8 @@ void CoinControlDialog::showMenu(const QPoint &point) {
         if (item->text(COLUMN_TXID).length() == 64) {
             COutPoint outpoint = buildOutPoint(item);
 
-            // transaction hash is 64 characters (this means its a child node,
-            // so its not a parent node in tree mode)
+            // transaction hash is 64 characters (this means it is a child node,
+            // so it is not a parent node in tree mode)
             copyTransactionHashAction->setEnabled(true);
             if (model->wallet().isLockedCoin(outpoint)) {
                 lockAction->setEnabled(false);
@@ -404,8 +400,8 @@ void CoinControlDialog::radioListMode(bool checked) {
 
 // checkbox clicked by user
 void CoinControlDialog::viewItemChanged(QTreeWidgetItem *item, int column) {
-    // transaction hash is 64 characters (this means its a child node, so its
-    // not a parent node in tree mode)
+    // transaction hash is 64 characters (this means it is a child node, so it
+    // is not a parent node in tree mode)
     if (column == COLUMN_CHECKBOX && item->text(COLUMN_TXID).length() == 64) {
         COutPoint outpoint = buildOutPoint(item);
 

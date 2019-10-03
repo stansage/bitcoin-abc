@@ -13,14 +13,13 @@
 #include <random.h>
 #include <sync.h>
 #include <ui_interface.h>
-#include <util.h>
-#include <utilstrencodings.h>
+#include <util/strencodings.h>
+#include <util/system.h>
 
 #include <univalue.h>
 
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/split.hpp>
-#include <boost/bind.hpp>
 #include <boost/signals2/signal.hpp>
 
 #include <memory> // for unique_ptr
@@ -539,11 +538,9 @@ UniValue CRPCTable::execute(Config &config,
 
 std::vector<std::string> CRPCTable::listCommands() const {
     std::vector<std::string> commandList;
-    typedef std::map<std::string, const ContextFreeRPCCommand *> commandMap;
-
-    std::transform(mapCommands.begin(), mapCommands.end(),
-                   std::back_inserter(commandList),
-                   boost::bind(&commandMap::value_type::first, _1));
+    for (const auto &i : mapCommands) {
+        commandList.emplace_back(i.first);
+    }
     return commandList;
 }
 

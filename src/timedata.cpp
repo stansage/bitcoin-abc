@@ -11,8 +11,8 @@
 #include <netaddress.h>
 #include <sync.h>
 #include <ui_interface.h>
-#include <util.h>
-#include <utilstrencodings.h>
+#include <util/strencodings.h>
+#include <util/system.h>
 #include <warnings.h>
 
 static CCriticalSection cs_nTimeOffset;
@@ -108,10 +108,10 @@ void AddTimeData(const CNetAddr &ip, int64_t nOffsetSample) {
 
         if (LogAcceptCategory(BCLog::NET)) {
             for (int64_t n : vSorted) {
-                LogPrint(BCLog::NET, "%+d  ", n);
+                LogPrintToBeContinued(BCLog::NET, "%+d  ", n);
             }
 
-            LogPrint(BCLog::NET, "|  ");
+            LogPrintToBeContinued(BCLog::NET, "|  ");
             LogPrint(BCLog::NET, "nTimeOffset = %+d  (%+d minutes)\n",
                      nTimeOffset, nTimeOffset / 60);
         }

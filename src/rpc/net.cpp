@@ -4,6 +4,7 @@
 
 #include <rpc/server.h>
 
+#include <banman.h>
 #include <chainparams.h>
 #include <clientversion.h>
 #include <config.h>
@@ -16,8 +17,8 @@
 #include <sync.h>
 #include <timedata.h>
 #include <ui_interface.h>
-#include <util.h>
-#include <utilstrencodings.h>
+#include <util/strencodings.h>
+#include <util/system.h>
 #include <validation.h>
 #include <version.h>
 #include <warnings.h>
@@ -132,6 +133,8 @@ static UniValue getpeerinfo(const Config &config,
             "    ],\n"
             "    \"whitelisted\": true|false, (boolean) Whether the peer is "
             "whitelisted\n"
+            "    \"minfeefilter\": n,         (numeric) The minimum fee rate "
+            "for transactions this peer accepts\n"
             "    \"bytessent_per_msg\": {\n"
             "       \"addr\": n,              (numeric) The total bytes sent "
             "aggregated by message type\n"
@@ -210,6 +213,7 @@ static UniValue getpeerinfo(const Config &config,
             obj.pushKV("inflight", heights);
         }
         obj.pushKV("whitelisted", stats.fWhitelisted);
+        obj.pushKV("minfeefilter", ValueFromAmount(stats.minFeeFilter));
 
         UniValue sendPerMsgCmd(UniValue::VOBJ);
         for (const mapMsgCmdSize::value_type &i : stats.mapSendBytesPerMsgCmd) {
@@ -640,17 +644,16 @@ static UniValue setban(const Config &config, const JSONRPCRequest &request) {
             HelpExampleRpc("setban", "\"192.168.0.6\", \"add\", 86400"));
     }
 
-    if (!g_connman) {
-        throw JSONRPCError(
-            RPC_CLIENT_P2P_DISABLED,
-            "Error: Peer-to-peer functionality missing or disabled");
+    if (!g_banman) {
+        throw JSONRPCError(RPC_DATABASE_ERROR,
+                           "Error: Ban database not loaded");
     }
 
     CSubNet subNet;
     CNetAddr netAddr;
     bool isSubnet = false;
 
-    if (request.params[0].get_str().find("/") != std::string::npos) {
+    if (request.params[0].get_str().find('/') != std::string::npos) {
         isSubnet = true;
     }
 
@@ -668,8 +671,8 @@ static UniValue setban(const Config &config, const JSONRPCRequest &request) {
     }
 
     if (strCommand == "add") {
-        if (isSubnet ? g_connman->IsBanned(subNet)
-                     : g_connman->IsBanned(netAddr)) {
+        if (isSubnet ? g_banman->IsBanned(subNet)
+                     : g_banman->IsBanned(netAddr)) {
             throw JSONRPCError(RPC_CLIENT_NODE_ALREADY_ADDED,
                                "Error: IP/Subnet already banned");
         }
@@ -685,13 +688,19 @@ static UniValue setban(const Config &config, const JSONRPCRequest &request) {
             absolute = true;
         }
 
-        isSubnet
-            ? g_connman->Ban(subNet, BanReasonManuallyAdded, banTime, absolute)
-            : g_connman->Ban(netAddr, BanReasonManuallyAdded, banTime,
-                             absolute);
+        if (isSubnet) {
+            g_banman->Ban(subNet, BanReasonManuallyAdded, banTime, absolute);
+            if (g_connman) {
+                g_connman->DisconnectNode(subNet);
+            }
+        } else {
+            g_banman->Ban(netAddr, BanReasonManuallyAdded, banTime, absolute);
+            if (g_connman) {
+                g_connman->DisconnectNode(netAddr);
+            }
+        }
     } else if (strCommand == "remove") {
-        if (!(isSubnet ? g_connman->Unban(subNet)
-                       : g_connman->Unban(netAddr))) {
+        if (!(isSubnet ? g_banman->Unban(subNet) : g_banman->Unban(netAddr))) {
             throw JSONRPCError(RPC_CLIENT_INVALID_IP_OR_SUBNET,
                                "Error: Unban failed. Requested address/subnet "
                                "was not previously banned.");
@@ -710,14 +719,13 @@ static UniValue listbanned(const Config &config,
                                  HelpExampleRpc("listbanned", ""));
     }
 
-    if (!g_connman) {
-        throw JSONRPCError(
-            RPC_CLIENT_P2P_DISABLED,
-            "Error: Peer-to-peer functionality missing or disabled");
+    if (!g_banman) {
+        throw JSONRPCError(RPC_DATABASE_ERROR,
+                           "Error: Ban database not loaded");
     }
 
     banmap_t banMap;
-    g_connman->GetBanned(banMap);
+    g_banman->GetBanned(banMap);
 
     UniValue bannedAddresses(UniValue::VARR);
     for (const auto &entry : banMap) {
@@ -744,13 +752,13 @@ static UniValue clearbanned(const Config &config,
                                  HelpExampleRpc("clearbanned", ""));
     }
 
-    if (!g_connman) {
+    if (!g_banman) {
         throw JSONRPCError(
             RPC_CLIENT_P2P_DISABLED,
             "Error: Peer-to-peer functionality missing or disabled");
     }
 
-    g_connman->ClearBanned();
+    g_banman->ClearBanned();
 
     return NullUniValue;
 }

@@ -13,7 +13,7 @@
 #include <random.h>
 #include <ui_interface.h>
 #include <uint256.h>
-#include <util.h>
+#include <util/system.h>
 
 #include <boost/thread.hpp> // boost::this_thread::interruption_point() (mingw)
 
@@ -263,7 +263,7 @@ bool CBlockTreeDB::ReadFlag(const std::string &name, bool &fValue) {
 }
 
 bool CBlockTreeDB::LoadBlockIndexGuts(
-    const Config &config,
+    const Consensus::Params &params,
     std::function<CBlockIndex *(const uint256 &)> insertBlockIndex) {
 
     std::unique_ptr<CDBIterator> pcursor(NewIterator());
@@ -299,7 +299,7 @@ bool CBlockTreeDB::LoadBlockIndexGuts(
         pindexNew->nTx = diskindex.nTx;
 
         if (!CheckProofOfWork(pindexNew->GetBlockHash(), pindexNew->nBits,
-                              config)) {
+                              params)) {
             return error("%s: CheckProofOfWork failed: %s", __func__,
                          pindexNew->ToString());
         }
@@ -378,7 +378,7 @@ bool CCoinsViewDB::Upgrade() {
 
     int64_t count = 0;
     LogPrintf("Upgrading utxo-set database...\n");
-    LogPrintf("[0%%]...");
+    LogPrintfToBeContinued("[0%%]...");
     uiInterface.ShowProgress(_("Upgrading UTXO database"), 0, true);
     size_t batch_size = 1 << 24;
     CDBBatch batch(db);
@@ -403,7 +403,7 @@ bool CCoinsViewDB::Upgrade() {
                                      percentageDone, true);
             if (reportDone < percentageDone / 10) {
                 // report max. every 10% step
-                LogPrintf("[%d%%]...", percentageDone);
+                LogPrintfToBeContinued("[%d%%]...", percentageDone);
                 reportDone = percentageDone / 10;
             }
         }

@@ -279,5 +279,12 @@ endif()
 add_executable(bitcoin-qt WIN32 bitcoin.cpp)
 target_link_libraries(bitcoin-qt bitcoin-qt-base)
 
+include(BinaryTest)
+add_to_symbols_check(bitcoin-qt)
+add_to_security_check(bitcoin-qt)
+
+include(InstallationHelper)
+install_target(bitcoin-qt)
+
 # Test tests
 add_subdirectory(test)

@@ -55,7 +55,8 @@ namespace {
     };
 
     //! Construct wallet tx struct.
-    WalletTx MakeWalletTx(CWallet &wallet, const CWalletTx &wtx) {
+    static WalletTx MakeWalletTx(CWallet &wallet, const CWalletTx &wtx)
+        EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
         WalletTx result;
         result.tx = wtx.tx;
         result.txin_is_mine.reserve(wtx.tx->vin.size());
@@ -84,7 +85,8 @@ namespace {
     }
 
     //! Construct wallet tx status struct.
-    WalletTxStatus MakeWalletTxStatus(const CWalletTx &wtx) {
+    static WalletTxStatus MakeWalletTxStatus(const CWalletTx &wtx)
+        EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
         WalletTxStatus result;
         CBlockIndex *block = LookupBlockIndex(wtx.hashBlock);
         result.block_height =
@@ -102,8 +104,9 @@ namespace {
     }
 
     //! Construct wallet TxOut struct.
-    WalletTxOut MakeWalletTxOut(CWallet &wallet, const CWalletTx &wtx, int n,
-                                int depth) {
+    static WalletTxOut MakeWalletTxOut(CWallet &wallet, const CWalletTx &wtx,
+                                       int n, int depth)
+        EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
         WalletTxOut result;
         result.txout = wtx.tx->vout[n];
         result.time = wtx.GetTxTime();
@@ -114,7 +117,8 @@ namespace {
 
     class WalletImpl : public Wallet {
     public:
-        WalletImpl(CWallet &wallet) : m_wallet(wallet) {}
+        WalletImpl(const std::shared_ptr<CWallet> &wallet)
+            : m_shared_wallet(wallet), m_wallet(*wallet.get()) {}
 
         bool encryptWallet(const SecureString &wallet_passphrase) override {
             return m_wallet.EncryptWallet(wallet_passphrase);
@@ -235,7 +239,7 @@ namespace {
                                             fail_reason, coin_control, sign)) {
                 return {};
             }
-            return std::move(pending);
+            return pending;
         }
         bool transactionCanBeAbandoned(const TxId &txid) override {
             return m_wallet.TransactionCanBeAbandoned(txid);
@@ -428,12 +432,13 @@ namespace {
             return GetMinimumFee(m_wallet, tx_bytes, coin_control, g_mempool);
         }
 
+        std::shared_ptr<CWallet> m_shared_wallet;
         CWallet &m_wallet;
     };
 
 } // namespace
 
-std::unique_ptr<Wallet> MakeWallet(CWallet &wallet) {
+std::unique_ptr<Wallet> MakeWallet(const std::shared_ptr<CWallet> &wallet) {
     return std::make_unique<WalletImpl>(wallet);
 }
 

@@ -395,14 +395,18 @@ def set_node_times(nodes, t):
 
 def disconnect_nodes(from_node, to_node):
     for peer_id in [peer['id'] for peer in from_node.getpeerinfo() if to_node.name in peer['subver']]:
-        from_node.disconnectnode(nodeid=peer_id)
+        try:
+            from_node.disconnectnode(nodeid=peer_id)
+        except JSONRPCException as e:
+            # If this node is disconnected between calculating the peer id
+            # and issuing the disconnect, don't worry about it.
+            # This avoids a race condition if we're mass-disconnecting peers.
+            if e.error['code'] != -29:  # RPC_CLIENT_NODE_NOT_CONNECTED
+                raise
 
-    for _ in range(50):
-        if [peer['id'] for peer in from_node.getpeerinfo() if to_node.name in peer['subver']] == []:
-            break
-        time.sleep(0.1)
-    else:
-        raise AssertionError("timed out waiting for disconnect")
+    # wait to disconnect
+    wait_until(lambda: [peer['id'] for peer in from_node.getpeerinfo(
+    ) if to_node.name in peer['subver']] == [], timeout=5)
 
 
 def connect_nodes(from_node, to_node):
@@ -413,8 +417,8 @@ def connect_nodes(from_node, to_node):
     from_node.addnode(ip_port, "onetry")
     # poll until version handshake complete to avoid race conditions
     # with transaction relaying
-    while any(peer['version'] == 0 for peer in from_node.getpeerinfo()):
-        time.sleep(0.1)
+    wait_until(lambda: all(peer['version'] !=
+                           0 for peer in from_node.getpeerinfo()))
 
 
 def connect_nodes_bi(a, b):
@@ -629,3 +633,16 @@ def create_lots_of_big_transactions(node, txouts, utxos, num, fee):
         txid = node.sendrawtransaction(signresult["hex"], True)
         txids.append(txid)
     return txids
+
+
+def find_vout_for_address(node, txid, addr):
+    """
+    Locate the vout index of the given transaction sending to the
+    given address. Raises runtime error exception if not found.
+    """
+    tx = node.getrawtransaction(txid, True)
+    for i in range(len(tx["vout"])):
+        if any([addr == a for a in tx["vout"][i]["scriptPubKey"]["addresses"]]):
+            return i
+    raise RuntimeError(
+        "Vout not found for address: txid={}, addr={}".format(txid, addr))

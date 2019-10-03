@@ -1,7 +1,12 @@
 # Copyright (c) 2017 The Bitcoin developers
 
 cmake_minimum_required(VERSION 3.5)
-project(BitcoinABC)
+project(bitcoin-abc
+	VERSION 0.20.3.0
+	# TODO add description and homepage when CMake > 3.12 is enforced.
+	# DESCRIPTION "Bitcoin ABC is a full node implementation of the Bitcoin Cash protocol."
+	# HOMEPAGE "https://www.bitcoinabc.org"
+)
 
 # Add path for custom modules
 set(CMAKE_MODULE_PATH
@@ -25,10 +30,17 @@ if(NOT CMAKE_BUILD_TYPE)
 		"Select the configuration for the build" FORCE)
 endif()
 
-# Add the magic targets `check` and `check-all`
+# Find the python interpreter. This is required for several targets.
+find_package(PythonInterp 3.4 REQUIRED)
+
+# Add the magic targets `check-*`
 add_custom_target(check-all)
 add_custom_target(check)
+add_custom_target(check-symbols)
+add_custom_target(check-security)
 
 add_subdirectory(src)
 add_subdirectory(test)
+
+add_subdirectory(contrib/devtools)
 add_subdirectory(doc)

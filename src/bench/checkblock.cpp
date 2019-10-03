@@ -4,6 +4,7 @@
 
 #include <bench/bench.h>
 
+#include <chainparams.h>
 #include <config.h>
 #include <consensus/validation.h>
 #include <streams.h>
@@ -41,6 +42,8 @@ static void DeserializeAndCheckBlockTest(benchmark::State &state) {
     stream.write(&a, 1); // Prevent compaction
 
     const Config &config = GetConfig();
+    const Consensus::Params params = config.GetChainParams().GetConsensus();
+    BlockValidationOptions options(config);
     while (state.KeepRunning()) {
         // Note that CBlock caches its checked state, so we need to recreate it
         // here.
@@ -49,7 +52,8 @@ static void DeserializeAndCheckBlockTest(benchmark::State &state) {
         assert(stream.Rewind(sizeof(block_bench::block413567)));
 
         CValidationState validationState;
-        assert(CheckBlock(config, block, validationState));
+        bool ret = CheckBlock(block, validationState, params, options);
+        assert(ret);
     }
 }
 

@@ -73,8 +73,9 @@ BOOST_FIXTURE_TEST_CASE(rescan, TestChain100Setup) {
     // before the missing block, and success for a key whose creation time is
     // after.
     {
-        CWallet wallet(Params(), "dummy", WalletDatabase::CreateDummy());
-        AddWallet(&wallet);
+        std::shared_ptr<CWallet> wallet = std::make_shared<CWallet>(
+            Params(), "dummy", WalletDatabase::CreateDummy());
+        AddWallet(wallet);
         UniValue keys;
         keys.setArray();
         UniValue key;
@@ -113,7 +114,7 @@ BOOST_FIXTURE_TEST_CASE(rescan, TestChain100Setup) {
                       "rescanning the relevant blocks (see -reindex and "
                       "-rescan options).\"}},{\"success\":true}]",
                       0, oldTip->GetBlockTimeMax(), TIMESTAMP_WINDOW));
-        RemoveWallet(&wallet);
+        RemoveWallet(wallet);
     }
 }
 
@@ -151,37 +152,39 @@ BOOST_FIXTURE_TEST_CASE(importwallet_rescan, TestChain100Setup) {
 
     // Import key into wallet and call dumpwallet to create backup file.
     {
-        CWallet wallet(Params(), "dummy", WalletDatabase::CreateDummy());
-        LOCK(wallet.cs_wallet);
-        wallet.mapKeyMetadata[coinbaseKey.GetPubKey().GetID()].nCreateTime =
+        std::shared_ptr<CWallet> wallet = std::make_shared<CWallet>(
+            Params(), "dummy", WalletDatabase::CreateDummy());
+        LOCK(wallet->cs_wallet);
+        wallet->mapKeyMetadata[coinbaseKey.GetPubKey().GetID()].nCreateTime =
             KEY_TIME;
-        wallet.AddKeyPubKey(coinbaseKey, coinbaseKey.GetPubKey());
+        wallet->AddKeyPubKey(coinbaseKey, coinbaseKey.GetPubKey());
 
         JSONRPCRequest request;
         request.params.setArray();
         request.params.push_back(backup_file);
-        AddWallet(&wallet);
+        AddWallet(wallet);
         ::dumpwallet(GetConfig(), request);
-        RemoveWallet(&wallet);
+        RemoveWallet(wallet);
     }
 
     // Call importwallet RPC and verify all blocks with timestamps >= BLOCK_TIME
     // were scanned, and no prior blocks were scanned.
     {
-        CWallet wallet(Params(), "dummy", WalletDatabase::CreateDummy());
+        std::shared_ptr<CWallet> wallet = std::make_shared<CWallet>(
+            Params(), "dummy", WalletDatabase::CreateDummy());
 
         JSONRPCRequest request;
         request.params.setArray();
         request.params.push_back(backup_file);
-        AddWallet(&wallet);
+        AddWallet(wallet);
         ::importwallet(GetConfig(), request);
-        RemoveWallet(&wallet);
+        RemoveWallet(wallet);
 
-        LOCK(wallet.cs_wallet);
-        BOOST_CHECK_EQUAL(wallet.mapWallet.size(), 3U);
+        LOCK(wallet->cs_wallet);
+        BOOST_CHECK_EQUAL(wallet->mapWallet.size(), 3U);
         BOOST_CHECK_EQUAL(m_coinbase_txns.size(), 103U);
         for (size_t i = 0; i < m_coinbase_txns.size(); ++i) {
-            bool found = wallet.GetWalletTx(m_coinbase_txns[i]->GetId());
+            bool found = wallet->GetWalletTx(m_coinbase_txns[i]->GetId());
             bool expected = i >= 100;
             BOOST_CHECK_EQUAL(found, expected);
         }
@@ -277,7 +280,7 @@ BOOST_AUTO_TEST_CASE(LoadReceiveRequests) {
     m_wallet.AddDestData(dest, "rr1", "val_rr1");
 
     auto values = m_wallet.GetDestValues("rr");
-    BOOST_CHECK_EQUAL(values.size(), 2);
+    BOOST_CHECK_EQUAL(values.size(), 2U);
     BOOST_CHECK_EQUAL(values[0], "val_rr0");
     BOOST_CHECK_EQUAL(values[1], "val_rr1");
 }
@@ -336,10 +339,10 @@ BOOST_FIXTURE_TEST_CASE(ListCoins, ListCoinsTestingSetup) {
     // Confirm ListCoins initially returns 1 coin grouped under coinbaseKey
     // address.
     auto list = wallet->ListCoins();
-    BOOST_CHECK_EQUAL(list.size(), 1);
+    BOOST_CHECK_EQUAL(list.size(), 1U);
     BOOST_CHECK_EQUAL(boost::get<CKeyID>(list.begin()->first).ToString(),
                       coinbaseAddress);
-    BOOST_CHECK_EQUAL(list.begin()->second.size(), 1);
+    BOOST_CHECK_EQUAL(list.begin()->second.size(), 1U);
 
     // Check initial balance from one mature coinbase transaction.
     BOOST_CHECK_EQUAL(50 * COIN, wallet->GetAvailableBalance());
@@ -351,17 +354,17 @@ BOOST_FIXTURE_TEST_CASE(ListCoins, ListCoinsTestingSetup) {
     AddTx(CRecipient{GetScriptForRawPubKey({}), 1 * COIN,
                      false /* subtract fee */});
     list = wallet->ListCoins();
-    BOOST_CHECK_EQUAL(list.size(), 1);
+    BOOST_CHECK_EQUAL(list.size(), 1U);
     BOOST_CHECK_EQUAL(boost::get<CKeyID>(list.begin()->first).ToString(),
                       coinbaseAddress);
-    BOOST_CHECK_EQUAL(list.begin()->second.size(), 2);
+    BOOST_CHECK_EQUAL(list.begin()->second.size(), 2U);
 
     // Lock both coins. Confirm number of available coins drops to 0.
     {
         LOCK2(cs_main, wallet->cs_wallet);
         std::vector<COutput> available;
         wallet->AvailableCoins(available);
-        BOOST_CHECK_EQUAL(available.size(), 2);
+        BOOST_CHECK_EQUAL(available.size(), 2U);
     }
     for (const auto &group : list) {
         for (const auto &coin : group.second) {
@@ -373,15 +376,15 @@ BOOST_FIXTURE_TEST_CASE(ListCoins, ListCoinsTestingSetup) {
         LOCK2(cs_main, wallet->cs_wallet);
         std::vector<COutput> available;
         wallet->AvailableCoins(available);
-        BOOST_CHECK_EQUAL(available.size(), 0);
+        BOOST_CHECK_EQUAL(available.size(), 0U);
     }
     // Confirm ListCoins still returns same result as before, despite coins
     // being locked.
     list = wallet->ListCoins();
-    BOOST_CHECK_EQUAL(list.size(), 1);
+    BOOST_CHECK_EQUAL(list.size(), 1U);
     BOOST_CHECK_EQUAL(boost::get<CKeyID>(list.begin()->first).ToString(),
                       coinbaseAddress);
-    BOOST_CHECK_EQUAL(list.begin()->second.size(), 2);
+    BOOST_CHECK_EQUAL(list.begin()->second.size(), 2U);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -1,7 +1,7 @@
 # Copyright (c) 2017 The Bitcoin developers
 
 cmake_minimum_required(VERSION 3.5)
-project(BitcoinABC)
+project(bitcoind)
 
 set(CMAKE_CXX_STANDARD 14)
 
@@ -142,6 +142,7 @@ add_compiler_flags(
 	-Wshadow
 	-Wrange-loop-analysis
 	-Wredundant-decls
+	-Wredundant-move
 )
 
 option(EXTRA_WARNINGS "Enable extra warnings" OFF)
@@ -166,15 +167,55 @@ add_subdirectory(leveldb)
 add_subdirectory(secp256k1)
 add_subdirectory(univalue)
 
+# Find the git root, and returns the full path to the .git/logs/HEAD file if
+# it exists.
+function(find_git_head_logs_file RESULT)
+	find_package(Git)
+	if(GIT_FOUND)
+		execute_process(
+			COMMAND "${GIT_EXECUTABLE}" "rev-parse" "--show-toplevel"
+			WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+			OUTPUT_VARIABLE GIT_ROOT
+			RESULT_VARIABLE GIT_RESULT
+			OUTPUT_STRIP_TRAILING_WHITESPACE
+		)
+
+		if(GIT_RESULT EQUAL 0)
+			set(GIT_LOGS_DIR "${GIT_ROOT}/.git/logs")
+			set(GIT_HEAD_LOGS_FILE "${GIT_LOGS_DIR}/HEAD")
+			# If the .git/logs/HEAD, create it
+			if(NOT EXISTS "${GIT_HEAD_LOGS_FILE}")
+				# FIXME No longer needed once cmake > 3.10 get enforced.
+				file(MAKE_DIRECTORY "${GIT_LOGS_DIR}")
+				# FIXME Replace with file(TOUCH) when cmake > 3.12 get enforced.
+				file(APPEND "${GIT_HEAD_LOGS_FILE}" "")
+			endif()
+			set(${RESULT} "${GIT_HEAD_LOGS_FILE}" PARENT_SCOPE)
+		endif()
+	endif()
+endfunction()
+
+find_git_head_logs_file(GIT_HEAD_LOGS_FILE)
+
 set(OBJ_DIR "${CMAKE_CURRENT_BINARY_DIR}/obj")
 file(MAKE_DIRECTORY "${OBJ_DIR}")
 set(BUILD_HEADER "${OBJ_DIR}/build.h")
+set(BUILD_HEADER_TMP "${BUILD_HEADER}.tmp")
+
 add_custom_command(
-	OUTPUT "${BUILD_HEADER}"
+	DEPENDS
+		"${GIT_HEAD_LOGS_FILE}"
+		"${CMAKE_SOURCE_DIR}/share/genbuild.sh"
+	OUTPUT
+		"${BUILD_HEADER}"
 	COMMAND
 		"${CMAKE_SOURCE_DIR}/share/genbuild.sh"
-		"${BUILD_HEADER}"
+		"${BUILD_HEADER_TMP}"
 		"${CMAKE_SOURCE_DIR}"
+	COMMAND
+		${CMAKE_COMMAND} -E copy_if_different "${BUILD_HEADER_TMP}" "${BUILD_HEADER}"
+	COMMAND
+		${CMAKE_COMMAND} -E remove "${BUILD_HEADER_TMP}"
 )
 
 # Because the Bitcoin ABc source code is disorganised, we
@@ -201,14 +242,14 @@ add_library(util
 	sync.cpp
 	threadinterrupt.cpp
 	uint256.cpp
-	util.cpp
-	utilmoneystr.cpp
-	utilstrencodings.cpp
-	utiltime.cpp
+	util/system.cpp
+	util/moneystr.cpp
+	util/strencodings.cpp
+	util/time.cpp
 	util/bytevectorhash.cpp
 
 	# obj/build.h
-	${BUILD_HEADER}
+	"${BUILD_HEADER}"
 )
 
 target_compile_definitions(util PUBLIC HAVE_CONFIG_H HAVE_BUILD_INFO)
@@ -336,16 +377,17 @@ add_library(bitcoinconsensus
 	script/script_error.cpp
 	script/sigencoding.cpp
 	uint256.cpp
-	utilstrencodings.cpp
+	util/strencodings.cpp
 )
 
 target_link_libraries(bitcoinconsensus common)
 
 # Bitcoin server facilities
 add_library(server
-	addrman.cpp
 	addrdb.cpp
+	addrman.cpp
 	avalanche.cpp
+	banman.cpp
 	bloom.cpp
 	blockencodings.cpp
 	blockfilter.cpp
@@ -450,6 +492,9 @@ if(BUILD_BITCOIN_SEEDER)
 	add_subdirectory(seeder)
 endif()
 
+include(BinaryTest)
+include(InstallationHelper)
+
 # bitcoin-cli
 if(BUILD_BITCOIN_CLI)
 	add_executable(bitcoin-cli bitcoin-cli.cpp)
@@ -458,6 +503,11 @@ if(BUILD_BITCOIN_CLI)
 	endif()
 
 	target_link_libraries(bitcoin-cli common rpcclient Event)
+
+	add_to_symbols_check(bitcoin-cli)
+	add_to_security_check(bitcoin-cli)
+
+	install_target(bitcoin-cli)
 endif()
 
 # bitcoin-tx
@@ -468,6 +518,11 @@ if(BUILD_BITCOIN_TX)
 	endif()
 
 	target_link_libraries(bitcoin-tx bitcoinconsensus)
+
+	add_to_symbols_check(bitcoin-tx)
+	add_to_security_check(bitcoin-tx)
+
+	install_target(bitcoin-tx)
 endif()
 
 # bitcoind
@@ -476,6 +531,10 @@ target_link_libraries(bitcoind server)
 if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 	target_sources(bitcoind PRIVATE bitcoind-res.rc)
 endif()
+add_to_symbols_check(bitcoind)
+add_to_security_check(bitcoind)
+
+install_target(bitcoind)
 
 # Bitcoin-qt
 if(BUILD_BITCOIN_QT)

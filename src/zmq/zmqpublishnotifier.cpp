@@ -5,10 +5,11 @@
 #include <zmq/zmqpublishnotifier.h>
 
 #include <chain.h>
+#include <chainparams.h>
 #include <config.h>
 #include <rpc/server.h>
 #include <streams.h>
-#include <util.h>
+#include <util/system.h>
 #include <validation.h>
 
 #include <cstdarg>
@@ -173,7 +174,8 @@ bool CZMQPublishRawBlockNotifier::NotifyBlock(const CBlockIndex *pindex) {
     {
         LOCK(cs_main);
         CBlock block;
-        if (!ReadBlockFromDisk(block, pindex, config)) {
+        if (!ReadBlockFromDisk(block, pindex,
+                               config.GetChainParams().GetConsensus())) {
             zmqError("Can't read block from disk");
             return false;
         }

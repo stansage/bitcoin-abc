@@ -20,7 +20,7 @@
 #include <qt/walletmodel.h>
 #include <rpc/client.h>
 #include <rpc/server.h>
-#include <util.h>
+#include <util/system.h>
 
 #ifdef ENABLE_WALLET
 #include <wallet/wallet.h>
@@ -67,7 +67,6 @@ namespace {
 const QStringList historyFilter = QStringList() << "importprivkey"
                                                 << "importmulti"
                                                 << "signmessagewithprivkey"
-                                                << "signrawtransaction"
                                                 << "signrawtransactionwithkey"
                                                 << "walletpassphrase"
                                                 << "walletpassphrasechange"
@@ -513,9 +512,8 @@ void RPCExecutor::request(const QString &command, const QString &walletID) {
 
 RPCConsole::RPCConsole(interfaces::Node &node,
                        const PlatformStyle *_platformStyle, QWidget *parent)
-    : QWidget(parent), m_node(node), ui(new Ui::RPCConsole), clientModel(0),
-      historyPtr(0), platformStyle(_platformStyle), peersTableContextMenu(0),
-      banTableContextMenu(0), consoleFontSize(0) {
+    : QWidget(parent), m_node(node), ui(new Ui::RPCConsole),
+      platformStyle(_platformStyle) {
     ui->setupUi(this);
     QSettings settings;
     if (!restoreGeometry(
@@ -1392,6 +1390,7 @@ void RPCConsole::banSelectedNode(int bantime) {
             clientModel->getPeerTableModel()->getNodeStats(detailNodeRow);
         if (stats) {
             m_node.ban(stats->nodeStats.addr, BanReasonManuallyAdded, bantime);
+            m_node.disconnect(stats->nodeStats.addr);
         }
     }
     clearSelectedNode();

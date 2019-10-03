@@ -17,9 +17,9 @@
 #include <primitives/transaction.h>
 #include <script/script.h>
 #include <script/sign.h>
-#include <util.h>
-#include <utilmoneystr.h>
-#include <utilstrencodings.h>
+#include <util/moneystr.h>
+#include <util/strencodings.h>
+#include <util/system.h>
 
 #include <boost/algorithm/string.hpp>
 
@@ -80,8 +80,8 @@ static void SetupBitcoinTxArgs() {
                      _("This command requires JSON registers:") +
                      _("prevtxs=JSON object") + ", " +
                      _("privatekeys=JSON object") + ". " +
-                     _("See signrawtransaction docs for format of sighash "
-                       "flags, JSON objects."),
+                     _("See signrawtransactionwithkey docs for format of "
+                       "sighash flags, JSON objects."),
                  false, OptionsCategory::COMMANDS);
 
     gArgs.AddArg("load=NAME:FILENAME",
@@ -334,7 +334,7 @@ static void MutateTxAddOutPubKey(CMutableTransaction &tx,
     bool bScriptHash = false;
     if (vStrInputParts.size() == 3) {
         std::string flags = vStrInputParts[2];
-        bScriptHash = (flags.find("S") != std::string::npos);
+        bScriptHash = (flags.find('S') != std::string::npos);
     }
 
     if (bScriptHash) {
@@ -395,7 +395,7 @@ static void MutateTxAddOutMultiSig(CMutableTransaction &tx,
     bool bScriptHash = false;
     if (vStrInputParts.size() == numkeys + 4) {
         std::string flags = vStrInputParts.back();
-        bScriptHash = (flags.find("S") != std::string::npos);
+        bScriptHash = (flags.find('S') != std::string::npos);
     } else if (vStrInputParts.size() > numkeys + 4) {
         // Validate that there were no more parameters passed
         throw std::runtime_error("Too many parameters");
@@ -462,7 +462,7 @@ static void MutateTxAddOutScript(CMutableTransaction &tx,
     bool bScriptHash = false;
     if (vStrInputParts.size() == 3) {
         std::string flags = vStrInputParts.back();
-        bScriptHash = (flags.find("S") != std::string::npos);
+        bScriptHash = (flags.find('S') != std::string::npos);
     }
 
     if (bScriptHash) {

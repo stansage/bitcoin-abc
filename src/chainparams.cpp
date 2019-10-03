@@ -6,11 +6,12 @@
 
 #include <chainparams.h>
 
+#include <chainparamsconstants.h>
 #include <chainparamsseeds.h>
 #include <consensus/merkle.h>
 #include <tinyformat.h>
-#include <util.h>
-#include <utilstrencodings.h>
+#include <util/strencodings.h>
+#include <util/system.h>
 
 #include <cassert>
 
@@ -104,13 +105,13 @@ public:
         consensus.fPowNoRetargeting = false;
 
         // The best chain should have at least this much work.
-        consensus.nMinimumChainWork = uint256S(
-            "000000000000000000000000000000000000000000fb3f4a1b1be99638d82790");
+        consensus.nMinimumChainWork =
+            ChainParamsConstants::MAINNET_MINIMUM_CHAIN_WORK;
 
         // By default assume that the signatures in ancestors of this block are
         // valid.
-        consensus.defaultAssumeValid = uint256S(
-            "000000000000000001beee8cc62754955b00233585d2c14ae26d0f3a5d1fb708");
+        consensus.defaultAssumeValid =
+            ChainParamsConstants::MAINNET_DEFAULT_ASSUME_VALID;
 
         // August 1, 2017 hard fork
         consensus.uahfHeight = 478558;
@@ -168,6 +169,8 @@ public:
         vSeeds.emplace_back("seed.bitprim.org");
         // Amaury SÉCHET
         vSeeds.emplace_back("seed.deadalnix.me");
+        // BCHD
+        vSeeds.emplace_back("seed.bchd.cash");
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<uint8_t>(1, 0);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<uint8_t>(1, 5);
@@ -270,13 +273,13 @@ public:
         consensus.fPowNoRetargeting = false;
 
         // The best chain should have at least this much work.
-        consensus.nMinimumChainWork = uint256S(
-            "0000000000000000000000000000000000000000000000512031dc9900995ec4");
+        consensus.nMinimumChainWork =
+            ChainParamsConstants::TESTNET_MINIMUM_CHAIN_WORK;
 
         // By default assume that the signatures in ancestors of this block are
         // valid.
-        consensus.defaultAssumeValid = uint256S(
-            "00000000fbabb53ec6eddb3d56d3262f30dbb6549b391255090d351eccd01c24");
+        consensus.defaultAssumeValid =
+            ChainParamsConstants::TESTNET_DEFAULT_ASSUME_VALID;
 
         // August 1, 2017 hard fork
         consensus.uahfHeight = 1155875;

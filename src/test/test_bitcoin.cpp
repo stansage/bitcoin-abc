@@ -4,6 +4,7 @@
 
 #include <test/test_bitcoin.h>
 
+#include <banman.h>
 #include <chain.h>
 #include <chainparams.h>
 #include <config.h>
@@ -16,6 +17,7 @@
 #include <miner.h>
 #include <net_processing.h>
 #include <noui.h>
+#include <pow.h>
 #include <pubkey.h>
 #include <random.h>
 #include <rpc/register.h>
@@ -30,16 +32,6 @@
 #include <memory>
 
 FastRandomContext g_insecure_rand_ctx;
-
-void CConnmanTest::AddNode(CNode &node) {
-    LOCK(g_connman->cs_vNodes);
-    g_connman->vNodes.push_back(&node);
-}
-
-void CConnmanTest::ClearNodes() {
-    LOCK(g_connman->cs_vNodes);
-    g_connman->vNodes.clear();
-}
 
 std::ostream &operator<<(std::ostream &os, const uint256 &num) {
     os << num.ToString();
@@ -103,8 +95,7 @@ TestingSetup::TestingSetup(const std::string &chainName)
 
     // We have to run a scheduler thread to prevent ActivateBestChain
     // from blocking due to queue overrun.
-    threadGroup.create_thread(
-        boost::bind(&CScheduler::serviceQueue, &scheduler));
+    threadGroup.create_thread(std::bind(&CScheduler::serviceQueue, &scheduler));
     GetMainSignals().RegisterBackgroundSignalScheduler(scheduler);
 
     g_mempool.setSanityCheck(1.0);
@@ -117,7 +108,8 @@ TestingSetup::TestingSetup(const std::string &chainName)
     {
         CValidationState state;
         if (!ActivateBestChain(config, state)) {
-            throw std::runtime_error("ActivateBestChain failed.");
+            throw std::runtime_error(strprintf("ActivateBestChain failed. (%s)",
+                                               FormatStateMessage(state)));
         }
     }
     nScriptCheckThreads = 3;
@@ -125,10 +117,11 @@ TestingSetup::TestingSetup(const std::string &chainName)
         threadGroup.create_thread(&ThreadScriptCheck);
     }
 
+    g_banman =
+        std::make_unique<BanMan>(GetDataDir() / "banlist.dat", chainparams,
+                                 nullptr, DEFAULT_MISBEHAVING_BANTIME);
     // Deterministic randomness for tests.
-    g_connman = std::unique_ptr<CConnman>(new CConnman(config, 0x1337, 0x1337));
-    connman = g_connman.get();
-    peerLogic.reset(new PeerLogicValidation(connman, scheduler));
+    g_connman = std::make_unique<CConnman>(config, 0x1337, 0x1337);
 }
 
 TestingSetup::~TestingSetup() {
@@ -137,7 +130,7 @@ TestingSetup::~TestingSetup() {
     GetMainSignals().FlushBackgroundCallbacks();
     GetMainSignals().UnregisterBackgroundSignalScheduler();
     g_connman.reset();
-    peerLogic.reset();
+    g_banman.reset();
     UnloadBlockIndex();
     pcoinsTip.reset();
     pcoinsdbview.reset();
@@ -185,10 +178,12 @@ CBlock TestChain100Setup::CreateAndProcessBlock(
     {
         LOCK(cs_main);
         unsigned int extraNonce = 0;
-        IncrementExtraNonce(config, &block, chainActive.Tip(), extraNonce);
+        IncrementExtraNonce(&block, chainActive.Tip(), config.GetMaxBlockSize(),
+                            extraNonce);
     }
 
-    while (!CheckProofOfWork(block.GetHash(), block.nBits, config)) {
+    const Consensus::Params &params = config.GetChainParams().GetConsensus();
+    while (!CheckProofOfWork(block.GetHash(), block.nBits, params)) {
         ++block.nNonce;
     }
 

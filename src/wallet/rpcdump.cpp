@@ -12,8 +12,8 @@
 #include <script/script.h>
 #include <script/standard.h>
 #include <sync.h>
-#include <util.h>
-#include <utiltime.h>
+#include <util/system.h>
+#include <util/time.h>
 #include <validation.h>
 #include <wallet/rpcwallet.h>
 #include <wallet/wallet.h>
@@ -92,8 +92,24 @@ bool GetWalletAddressesForKey(const Config &config, CWallet *const pwallet,
     return fLabelFound;
 }
 
+static const int64_t TIMESTAMP_MIN = 0;
+
+static void RescanWallet(CWallet &wallet, const WalletRescanReserver &reserver,
+                         int64_t time_begin = TIMESTAMP_MIN,
+                         bool update = true) {
+    int64_t scanned_time = wallet.RescanFromTime(time_begin, reserver, update);
+    if (wallet.IsAbortingRescan()) {
+        throw JSONRPCError(RPC_MISC_ERROR, "Rescan aborted by user.");
+    } else if (scanned_time > time_begin) {
+        throw JSONRPCError(RPC_WALLET_ERROR,
+                           "Rescan was unable to fully rescan the blockchain. "
+                           "Some transactions may be missing.");
+    }
+}
+
 UniValue importprivkey(const Config &config, const JSONRPCRequest &request) {
-    CWallet *const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet *const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -192,23 +208,15 @@ UniValue importprivkey(const Config &config, const JSONRPCRequest &request) {
         }
     }
     if (fRescan) {
-        int64_t scanned_time =
-            pwallet->RescanFromTime(TIMESTAMP_MIN, reserver, true /* update */);
-        if (pwallet->IsAbortingRescan()) {
-            throw JSONRPCError(RPC_MISC_ERROR, "Rescan aborted by user.");
-        }
-        if (scanned_time > TIMESTAMP_MIN) {
-            throw JSONRPCError(RPC_WALLET_ERROR,
-                               "Rescan was unable to fully rescan the "
-                               "blockchain. Some transactions may be missing.");
-        }
+        RescanWallet(*pwallet, reserver);
     }
 
     return NullUniValue;
 }
 
 UniValue abortrescan(const Config &config, const JSONRPCRequest &request) {
-    CWallet *const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet *const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -236,7 +244,8 @@ UniValue abortrescan(const Config &config, const JSONRPCRequest &request) {
 static void ImportAddress(CWallet *, const CTxDestination &dest,
                           const std::string &strLabel);
 static void ImportScript(CWallet *const pwallet, const CScript &script,
-                         const std::string &strLabel, bool isRedeemScript) {
+                         const std::string &strLabel, bool isRedeemScript)
+    EXCLUSIVE_LOCKS_REQUIRED(pwallet->cs_wallet) {
     if (!isRedeemScript && ::IsMine(*pwallet, script) == ISMINE_SPENDABLE) {
         throw JSONRPCError(RPC_WALLET_ERROR, "The wallet already contains the "
                                              "private key for this address or "
@@ -265,7 +274,8 @@ static void ImportScript(CWallet *const pwallet, const CScript &script,
 }
 
 static void ImportAddress(CWallet *const pwallet, const CTxDestination &dest,
-                          const std::string &strLabel) {
+                          const std::string &strLabel)
+    EXCLUSIVE_LOCKS_REQUIRED(pwallet->cs_wallet) {
     CScript script = GetScriptForDestination(dest);
     ImportScript(pwallet, script, strLabel, false);
     // add to address book or update label
@@ -275,7 +285,8 @@ static void ImportAddress(CWallet *const pwallet, const CTxDestination &dest,
 }
 
 UniValue importaddress(const Config &config, const JSONRPCRequest &request) {
-    CWallet *const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet *const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -368,16 +379,7 @@ UniValue importaddress(const Config &config, const JSONRPCRequest &request) {
         }
     }
     if (fRescan) {
-        int64_t scanned_time =
-            pwallet->RescanFromTime(TIMESTAMP_MIN, reserver, true /* update */);
-        if (pwallet->IsAbortingRescan()) {
-            throw JSONRPCError(RPC_MISC_ERROR, "Rescan aborted by user.");
-        }
-        if (scanned_time > TIMESTAMP_MIN) {
-            throw JSONRPCError(RPC_WALLET_ERROR,
-                               "Rescan was unable to fully rescan the "
-                               "blockchain. Some transactions may be missing.");
-        }
+        RescanWallet(*pwallet, reserver);
         pwallet->ReacceptWalletTransactions();
     }
 
@@ -386,7 +388,8 @@ UniValue importaddress(const Config &config, const JSONRPCRequest &request) {
 
 UniValue importprunedfunds(const Config &config,
                            const JSONRPCRequest &request) {
-    CWallet *const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet *const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -465,7 +468,8 @@ UniValue importprunedfunds(const Config &config,
 
 UniValue removeprunedfunds(const Config &config,
                            const JSONRPCRequest &request) {
-    CWallet *const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet *const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -511,7 +515,8 @@ UniValue removeprunedfunds(const Config &config,
 }
 
 UniValue importpubkey(const Config &config, const JSONRPCRequest &request) {
-    CWallet *const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet *const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -589,16 +594,7 @@ UniValue importpubkey(const Config &config, const JSONRPCRequest &request) {
         pwallet->LearnAllRelatedScripts(pubKey);
     }
     if (fRescan) {
-        int64_t scanned_time =
-            pwallet->RescanFromTime(TIMESTAMP_MIN, reserver, true /* update */);
-        if (pwallet->IsAbortingRescan()) {
-            throw JSONRPCError(RPC_MISC_ERROR, "Rescan aborted by user.");
-        }
-        if (scanned_time > TIMESTAMP_MIN) {
-            throw JSONRPCError(RPC_WALLET_ERROR,
-                               "Rescan was unable to fully rescan the "
-                               "blockchain. Some transactions may be missing.");
-        }
+        RescanWallet(*pwallet, reserver);
         pwallet->ReacceptWalletTransactions();
     }
 
@@ -606,7 +602,8 @@ UniValue importpubkey(const Config &config, const JSONRPCRequest &request) {
 }
 
 UniValue importwallet(const Config &config, const JSONRPCRequest &request) {
-    CWallet *const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet *const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -751,16 +748,7 @@ UniValue importwallet(const Config &config, const JSONRPCRequest &request) {
     }
     // hide progress dialog in GUI
     uiInterface.ShowProgress("", 100, false);
-    int64_t scanned_time =
-        pwallet->RescanFromTime(nTimeBegin, reserver, false /* update */);
-    if (pwallet->IsAbortingRescan()) {
-        throw JSONRPCError(RPC_MISC_ERROR, "Rescan aborted by user.");
-    }
-    if (scanned_time > nTimeBegin) {
-        throw JSONRPCError(RPC_WALLET_ERROR,
-                           "Rescan was unable to fully rescan the blockchain. "
-                           "Some transactions may be missing.");
-    }
+    RescanWallet(*pwallet, reserver, nTimeBegin, false /* update */);
     pwallet->MarkDirty();
 
     if (!fGood) {
@@ -772,7 +760,8 @@ UniValue importwallet(const Config &config, const JSONRPCRequest &request) {
 }
 
 UniValue dumpprivkey(const Config &config, const JSONRPCRequest &request) {
-    CWallet *const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet *const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -817,7 +806,8 @@ UniValue dumpprivkey(const Config &config, const JSONRPCRequest &request) {
 }
 
 UniValue dumpwallet(const Config &config, const JSONRPCRequest &request) {
-    CWallet *const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet *const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -970,7 +960,8 @@ UniValue dumpwallet(const Config &config, const JSONRPCRequest &request) {
 }
 
 static UniValue ProcessImport(CWallet *const pwallet, const UniValue &data,
-                              const int64_t timestamp) {
+                              const int64_t timestamp)
+    EXCLUSIVE_LOCKS_REQUIRED(pwallet->cs_wallet) {
     try {
         bool success = false;
 
@@ -1341,7 +1332,9 @@ static int64_t GetImportTimestamp(const UniValue &data, int64_t now) {
 }
 
 UniValue importmulti(const Config &config, const JSONRPCRequest &mainRequest) {
-    CWallet *const pwallet = GetWalletForJSONRPCRequest(mainRequest);
+    std::shared_ptr<CWallet> const wallet =
+        GetWalletForJSONRPCRequest(mainRequest);
+    CWallet *const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, mainRequest.fHelp)) {
         return NullUniValue;
     }

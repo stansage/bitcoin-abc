@@ -18,6 +18,7 @@ import time
 from .authproxy import JSONRPCException
 from . import coverage
 from .test_node import TestNode
+from .mininode import NetworkThread
 from .util import (
     assert_equal,
     check_json_precision,
@@ -69,6 +70,7 @@ class BitcoinTestFramework():
         """Sets test framework defaults. Do not override this method. Instead, override the set_test_params() method"""
         self.setup_clean_chain = False
         self.nodes = []
+        self.network_thread = None
         self.mocktime = 0
         self.supports_cli = False
         self.bind_to_localhost_only = True
@@ -133,6 +135,10 @@ class BitcoinTestFramework():
             self.options.tmpdir = tempfile.mkdtemp(prefix="test")
         self._start_logging()
 
+        self.log.debug('Setting up network thread')
+        self.network_thread = NetworkThread()
+        self.network_thread.start()
+
         success = TestStatus.FAILED
 
         try:
@@ -161,6 +167,8 @@ class BitcoinTestFramework():
             print("Testcase failed. Attaching python debugger. Enter ? for help")
             pdb.set_trace()
 
+        self.log.debug('Closing down network thread')
+        self.network_thread.close()
         if not self.options.noshutdown:
             self.log.info("Stopping nodes")
             if self.nodes:
@@ -411,7 +419,7 @@ class BitcoinTestFramework():
             for node in self.nodes:
                 node.wait_for_rpc_connection()
 
-            # For backwared compatibility of the python scripts with previous
+            # For backward compatibility of the python scripts with previous
             # versions of the cache, set mocktime to Jan 1,
             # 2014 + (201 * 10 * 60)
             self.mocktime = 1388534400 + (201 * 10 * 60)
@@ -460,40 +468,6 @@ class BitcoinTestFramework():
         Useful if a test case wants complete control over initialization."""
         for i in range(self.num_nodes):
             initialize_datadir(self.options.tmpdir, i)
-
-
-class ComparisonTestFramework(BitcoinTestFramework):
-    """Test framework for doing p2p comparison testing
-
-    Sets up some bitcoind binaries:
-    - 1 binary: test binary
-    - 2 binaries: 1 test binary, 1 ref binary
-    - n>2 binaries: 1 test binary, n-1 ref binaries"""
-
-    def set_test_params(self):
-        self.num_nodes = 2
-        self.setup_clean_chain = True
-
-    def add_options(self, parser):
-        parser.add_argument("--testbinary", dest="testbinary",
-                            help="bitcoind binary to test")
-        parser.add_argument("--refbinary", dest="refbinary",
-                            help="bitcoind binary to use for reference nodes (if any)")
-
-    def setup_network(self):
-        extra_args = [['-whitelist=127.0.0.1']] * self.num_nodes
-
-        if not self.options.testbinary:
-            self.options.testbinary = self.options.bitcoind
-        if not self.options.refbinary:
-            self.options.refbinary = self.options.bitcoind
-
-        if hasattr(self, "extra_args"):
-            extra_args = self.extra_args
-        self.add_nodes(self.num_nodes, extra_args,
-                       binary=[self.options.testbinary] +
-                       [self.options.refbinary] * (self.num_nodes - 1))
-        self.start_nodes()
 
 
 class SkipTest(Exception):

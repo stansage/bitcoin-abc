@@ -12,9 +12,9 @@
 #include <script/standard.h>
 #include <serialize.h>
 #include <streams.h>
-#include <util.h>
-#include <utilmoneystr.h>
-#include <utilstrencodings.h>
+#include <util/moneystr.h>
+#include <util/strencodings.h>
+#include <util/system.h>
 
 #include <univalue.h>
 
@@ -34,7 +34,7 @@ std::string FormatScript(const CScript &script) {
     while (it != script.end()) {
         CScript::const_iterator it2 = it;
         std::vector<uint8_t> vch;
-        if (script.GetOp2(it, op, &vch)) {
+        if (script.GetOp(it, op, vch)) {
             if (op == OP_0) {
                 ret += "0 ";
                 continue;
@@ -248,7 +248,7 @@ void TxToUniv(const CTransaction &tx, const uint256 &hashBlock, UniValue &entry,
     }
 
     if (include_hex) {
-        // the hex-encoded transaction. used the name "hex" to be consistent
+        // The hex-encoded transaction. Used the name "hex" to be consistent
         // with the verbose output of "getrawtransaction".
         entry.pushKV("hex", EncodeHexTx(tx, serialize_flags));
     }

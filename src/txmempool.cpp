@@ -17,9 +17,9 @@
 #include <reverse_iterator.h>
 #include <streams.h>
 #include <timedata.h>
-#include <util.h>
-#include <utilmoneystr.h>
-#include <utiltime.h>
+#include <util/moneystr.h>
+#include <util/system.h>
+#include <util/time.h>
 #include <validation.h>
 #include <version.h>
 
@@ -568,8 +568,8 @@ void CTxMemPool::removeForReorg(const Config &config,
         bool validLP = TestLockPointValidity(&lp);
 
         CValidationState state;
-        if (!ContextualCheckTransactionForCurrentBlock(config, tx, state,
-                                                       flags) ||
+        if (!ContextualCheckTransactionForCurrentBlock(
+                config.GetChainParams().GetConsensus(), tx, state, flags) ||
             !CheckSequenceLocks(tx, flags, &lp, validLP)) {
             // Note if CheckSequenceLocks fails the LockPoints may still be
             // invalid. So it's critical that we remove the tx and not depend on
@@ -610,7 +610,7 @@ void CTxMemPool::removeForReorg(const Config &config,
 
 void CTxMemPool::removeConflicts(const CTransaction &tx) {
     // Remove transactions which depend on inputs of tx, recursively
-    LOCK(cs);
+    AssertLockHeld(cs);
     for (const CTxIn &txin : tx.vin) {
         auto it = mapNextTx.find(txin.prevout);
         if (it != mapNextTx.end()) {
@@ -779,7 +779,7 @@ void CTxMemPool::check(const CCoinsViewCache *pcoins) const {
         // Check children against mapNextTx
         CTxMemPool::setEntries setChildrenCheck;
         auto iter = mapNextTx.lower_bound(COutPoint(it->GetTx().GetId(), 0));
-        int64_t childSizes = 0;
+        uint64_t child_sizes = 0;
         for (; iter != mapNextTx.end() &&
                iter->first->GetTxId() == it->GetTx().GetId();
              ++iter) {
@@ -787,14 +787,14 @@ void CTxMemPool::check(const CCoinsViewCache *pcoins) const {
             // mapNextTx points to in-mempool transactions
             assert(childit != mapTx.end());
             if (setChildrenCheck.insert(childit).second) {
-                childSizes += childit->GetTxSize();
+                child_sizes += childit->GetTxSize();
             }
         }
         assert(setChildrenCheck == GetMemPoolChildren(it));
         // Also check to make sure size is greater than sum with immediate
         // children. Just a sanity check, not definitive that this calc is
         // correct...
-        assert(it->GetSizeWithDescendants() >= childSizes + it->GetTxSize());
+        assert(it->GetSizeWithDescendants() >= child_sizes + it->GetTxSize());
 
         if (fDependsWait) {
             waitingOnDependants.push_back(&(*it));
@@ -807,7 +807,6 @@ void CTxMemPool::check(const CCoinsViewCache *pcoins) const {
     while (!waitingOnDependants.empty()) {
         const CTxMemPoolEntry *entry = waitingOnDependants.front();
         waitingOnDependants.pop_front();
-        CValidationState state;
         if (!mempoolDuplicate.HaveInputs(entry->GetTx())) {
             waitingOnDependants.push_back(entry);
             stepsSinceLastRemove++;
@@ -1201,9 +1200,7 @@ void CTxMemPool::TrimToSize(size_t sizelimit,
                     if (exists(txin.prevout.GetTxId())) {
                         continue;
                     }
-                    if (!mapNextTx.count(txin.prevout)) {
-                        pvNoSpendsRemaining->push_back(txin.prevout);
-                    }
+                    pvNoSpendsRemaining->push_back(txin.prevout);
                 }
             }
         }

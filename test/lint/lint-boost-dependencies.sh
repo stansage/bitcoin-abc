@@ -6,6 +6,8 @@
 #
 # Guard against accidental introduction of new Boost dependencies.
 
+export LC_ALL=C
+
 EXPECTED_BOOST_INCLUDES=(
     boost/algorithm/string.hpp
     boost/algorithm/string/classification.hpp
@@ -13,7 +15,6 @@ EXPECTED_BOOST_INCLUDES=(
     boost/algorithm/string/replace.hpp
     boost/algorithm/string/split.hpp
     boost/assign/std/vector.hpp
-    boost/bind.hpp
     boost/chrono/chrono.hpp
     boost/date_time/posix_time/posix_time.hpp
     boost/filesystem.hpp

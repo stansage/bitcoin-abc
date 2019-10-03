@@ -15,7 +15,6 @@
 #include <blockfileinfo.h>
 #include <coins.h>
 #include <consensus/consensus.h>
-#include <consensus/params.h>
 #include <flatfile.h>
 #include <fs.h>
 #include <protocol.h> // For CMessageHeader::MessageMagic
@@ -52,6 +51,10 @@ struct FlatFilePos;
 struct ChainTxData;
 struct PrecomputedTransactionData;
 struct LockPoints;
+
+namespace Consensus {
+struct Params;
+}
 
 #define MIN_TRANSACTION_SIZE                                                   \
     (::GetSerializeSize(CTransaction(), SER_NETWORK, PROTOCOL_VERSION))
@@ -288,17 +291,34 @@ static const uint64_t MIN_DISK_SPACE_FOR_BLOCK_FILES = 550 * 1024 * 1024;
 
 class BlockValidationOptions {
 private:
+    uint64_t excessiveBlockSize;
     bool checkPoW : 1;
     bool checkMerkleRoot : 1;
 
 public:
     // Do full validation by default
-    BlockValidationOptions() : checkPoW(true), checkMerkleRoot(true) {}
-    BlockValidationOptions(bool checkPoWIn, bool checkMerkleRootIn)
-        : checkPoW(checkPoWIn), checkMerkleRoot(checkMerkleRootIn) {}
+    BlockValidationOptions(const Config &config);
+    BlockValidationOptions(uint64_t _excessiveBlockSize, bool _checkPow = true,
+                           bool _checkMerkleRoot = true)
+        : excessiveBlockSize(_excessiveBlockSize), checkPoW(_checkPow),
+          checkMerkleRoot(_checkMerkleRoot) {}
+
+    BlockValidationOptions withCheckPoW(bool _checkPoW = true) const {
+        BlockValidationOptions ret = *this;
+        ret.checkPoW = _checkPoW;
+        return ret;
+    }
+
+    BlockValidationOptions
+    withCheckMerkleRoot(bool _checkMerkleRoot = true) const {
+        BlockValidationOptions ret = *this;
+        ret.checkMerkleRoot = _checkMerkleRoot;
+        return ret;
+    }
 
     bool shouldValidatePoW() const { return checkPoW; }
     bool shouldValidateMerkleRoot() const { return checkMerkleRoot; }
+    uint64_t getExcessiveBlockSize() const { return excessiveBlockSize; }
 };
 
 /**
@@ -313,7 +333,8 @@ public:
  * Note that we guarantee that either the proof-of-work is valid on pblock, or
  * (and possibly also) BlockChecked will have been called.
  *
- * Call without cs_main held.
+ * May not be called with cs_main held. May not be called in a
+ * validationinterface callback.
  *
  * @param[in]   config  The global config.
  * @param[in]   pblock  The block we want to process.
@@ -330,7 +351,8 @@ bool ProcessNewBlock(const Config &config,
 /**
  * Process incoming block headers.
  *
- * Call without cs_main held.
+ * May not be called with cs_main held. May not be called in a
+ * validationinterface callback.
  *
  * @param[in]  config        The config.
  * @param[in]  block         The block headers themselves.
@@ -399,18 +421,15 @@ bool IsInitialBlockDownload();
 /**
  * Retrieve a transaction (from memory pool, or from disk, if possible).
  */
-bool GetTransaction(const Config &config, const TxId &txid, CTransactionRef &tx,
-                    uint256 &hashBlock, bool fAllowSlow = false,
-                    CBlockIndex *blockIndex = nullptr);
+bool GetTransaction(const Consensus::Params &params, const TxId &txid,
+                    CTransactionRef &tx, uint256 &hashBlock,
+                    bool fAllowSlow = false, CBlockIndex *blockIndex = nullptr);
 
 /**
- * Find the best known block, and make it the active tip of the block chain.
- * If it fails, the tip is not updated.
+ * Find the best known block, and make it the tip of the block chain
  *
- * pblock is either nullptr or a pointer to a block that is already loaded
- * in memory (to avoid loading it from disk again).
- *
- * Returns true if a new chain tip was set.
+ * May not be called with cs_main held. May not be called in a
+ * validationinterface callback.
  */
 bool ActivateBestChain(
     const Config &config, CValidationState &state,
@@ -454,7 +473,8 @@ bool AcceptToMemoryPool(const Config &config, CTxMemPool &pool,
                         bool fLimitFree, bool *pfMissingInputs,
                         bool fOverrideMempoolLimit = false,
                         const Amount nAbsurdFee = Amount::zero(),
-                        bool test_accept = false);
+                        bool test_accept = false)
+    EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /** Convert CValidationState to a human-readable message for logging */
 std::string FormatStateMessage(const CValidationState &state);
@@ -495,7 +515,8 @@ void UpdateCoins(CCoinsViewCache &view, const CTransaction &tx, CTxUndo &txundo,
  * Test whether the LockPoints height and time are still valid on the current
  * chain.
  */
-bool TestLockPointValidity(const LockPoints *lp);
+bool TestLockPointValidity(const LockPoints *lp)
+    EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /**
  * Check if transaction will be BIP 68 final in the next block to be created.
@@ -510,7 +531,8 @@ bool TestLockPointValidity(const LockPoints *lp);
  */
 bool CheckSequenceLocks(const CTransaction &tx, int flags,
                         LockPoints *lp = nullptr,
-                        bool useExistingLockPoints = false);
+                        bool useExistingLockPoints = false)
+    EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /**
  * Closure representing one script verification.
@@ -558,9 +580,9 @@ public:
 
 /** Functions for disk access for blocks */
 bool ReadBlockFromDisk(CBlock &block, const FlatFilePos &pos,
-                       const Config &config);
+                       const Consensus::Params &params);
 bool ReadBlockFromDisk(CBlock &block, const CBlockIndex *pindex,
-                       const Config &config);
+                       const Consensus::Params &params);
 
 /** Functions for validating blocks and updating the block tree */
 
@@ -570,9 +592,9 @@ bool ReadBlockFromDisk(CBlock &block, const CBlockIndex *pindex,
  * Returns true if the provided block is valid (has valid header,
  * transactions are valid, block is a valid size, etc.)
  */
-bool CheckBlock(
-    const Config &Config, const CBlock &block, CValidationState &state,
-    BlockValidationOptions validationOptions = BlockValidationOptions());
+bool CheckBlock(const CBlock &block, CValidationState &state,
+                const Consensus::Params &params,
+                BlockValidationOptions validationOptions);
 
 /**
  * This is a variant of ContextualCheckTransaction which computes the contextual
@@ -580,7 +602,7 @@ bool CheckBlock(
  *
  * See consensus/consensus.h for flag definitions.
  */
-bool ContextualCheckTransactionForCurrentBlock(const Config &config,
+bool ContextualCheckTransactionForCurrentBlock(const Consensus::Params &params,
                                                const CTransaction &tx,
                                                CValidationState &state,
                                                int flags = -1);
@@ -589,10 +611,9 @@ bool ContextualCheckTransactionForCurrentBlock(const Config &config,
  * Check a block is completely valid from start to finish (only works on top of
  * our current best block, with cs_main held)
  */
-bool TestBlockValidity(
-    const Config &config, CValidationState &state, const CBlock &block,
-    CBlockIndex *pindexPrev,
-    BlockValidationOptions validationOptions = BlockValidationOptions());
+bool TestBlockValidity(CValidationState &state, const CChainParams &params,
+                       const CBlock &block, CBlockIndex *pindexPrev,
+                       BlockValidationOptions validationOptions);
 
 /**
  * When there are blocks in the active chain with missing data, rewind the
@@ -613,19 +634,17 @@ public:
 };
 
 /** Replay blocks that aren't fully applied to the database. */
-bool ReplayBlocks(const Config &config, CCoinsView *view);
+bool ReplayBlocks(const Consensus::Params &params, CCoinsView *view);
 
 /** Find the last common block between the parameter chain and a locator. */
 CBlockIndex *FindForkInGlobalIndex(const CChain &chain,
                                    const CBlockLocator &locator);
 
 /**
- * Treats a block as if it were received before others with the same work,
- * making it the active chain tip if applicable. Successive calls to
- * PreciousBlock() will override the effects of earlier calls. The effects of
- * calls to PreciousBlock() are not retained across restarts.
+ * Mark a block as precious and reorganize.
  *
- * Returns true if the provided block index successfully became the chain tip.
+ * May not be called with cs_main held. May not be called in a
+ * validationinterface callback.
  */
 bool PreciousBlock(const Config &config, CValidationState &state,
                    CBlockIndex *pindex);

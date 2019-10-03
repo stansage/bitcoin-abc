@@ -5,7 +5,7 @@
 
 #include <rpc/client.h>
 #include <rpc/protocol.h>
-#include <util.h>
+#include <util/system.h>
 
 #include <cstdint>
 #include <set>
@@ -91,8 +91,6 @@ static const CRPCConvertParam vRPCConvertParams[] = {
     {"createrawtransaction", 0, "inputs"},
     {"createrawtransaction", 1, "outputs"},
     {"createrawtransaction", 2, "locktime"},
-    {"signrawtransaction", 1, "prevtxs"},
-    {"signrawtransaction", 2, "privkeys"},
     {"signrawtransactionwithkey", 1, "privkeys"},
     {"signrawtransactionwithkey", 2, "prevtxs"},
     {"signrawtransactionwithwallet", 1, "prevtxs"},
@@ -209,7 +207,7 @@ UniValue RPCConvertNamedValues(const std::string &strMethod,
     UniValue params(UniValue::VOBJ);
 
     for (const std::string &s : strParams) {
-        size_t pos = s.find("=");
+        size_t pos = s.find('=');
         if (pos == std::string::npos) {
             throw(std::runtime_error("No '=' in named argument '" + s +
                                      "', this needs to be present for every "

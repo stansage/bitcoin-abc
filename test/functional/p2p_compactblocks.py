@@ -42,7 +42,6 @@ from test_framework.messages import (
 )
 from test_framework.mininode import (
     mininode_lock,
-    network_thread_start,
     P2PInterface,
 )
 from test_framework.script import CScript, OP_TRUE
@@ -126,7 +125,7 @@ class TestP2PConn(P2PInterface):
         This is used when we want to send a message into the node that we expect
         will get us disconnected, eg an invalid block."""
         self.send_message(message)
-        wait_until(lambda: self.state != "connected",
+        wait_until(lambda: not self.is_connected,
                    timeout=timeout, lock=mininode_lock)
 
 
@@ -602,7 +601,7 @@ class CompactBlocksTest(BitcoinTestFramework):
         # Note that it's possible for bitcoind to be smart enough to know we're
         # lying, since it could check to see if the shortid matches what we're
         # sending, and eg disconnect us for misbehavior.  If that behavior
-        # change were made, we could just modify this test by having a
+        # change was made, we could just modify this test by having a
         # different peer provide the block further down, so that we're still
         # verifying that the block isn't marked bad permanently. This is good
         # enough for now.
@@ -835,16 +834,12 @@ class CompactBlocksTest(BitcoinTestFramework):
         assert_equal(int(node.getbestblockhash(), 16), block.sha256)
 
     def run_test(self):
-        # Setup the p2p connections and start up the network thread.
+        # Setup the p2p connections
         self.test_node = self.nodes[0].add_p2p_connection(TestP2PConn())
         self.ex_softfork_node = self.nodes[1].add_p2p_connection(
             TestP2PConn(), services=NODE_NETWORK)
         self.old_node = self.nodes[1].add_p2p_connection(
             TestP2PConn(), services=NODE_NETWORK)
-
-        network_thread_start()
-
-        self.test_node.wait_for_verack()
 
         # We will need UTXOs to construct transactions in later tests.
         self.make_utxos()

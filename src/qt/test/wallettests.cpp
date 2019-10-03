@@ -53,18 +53,18 @@ void ConfirmSend(QString *text = nullptr, bool cancel = false) {
 }
 
 //! Send coins to address and return txid.
-uint256 SendCoins(CWallet &wallet, SendCoinsDialog &sendCoinsDialog,
-                  const CTxDestination &address, Amount amount) {
+TxId SendCoins(CWallet &wallet, SendCoinsDialog &sendCoinsDialog,
+               const CTxDestination &address, Amount amount) {
     QVBoxLayout *entries = sendCoinsDialog.findChild<QVBoxLayout *>("entries");
     SendCoinsEntry *entry =
         qobject_cast<SendCoinsEntry *>(entries->itemAt(0)->widget());
     entry->findChild<QValidatedLineEdit *>("payTo")->setText(
         QString::fromStdString(EncodeCashAddr(address, Params())));
     entry->findChild<BitcoinAmountField *>("payAmount")->setValue(amount);
-    uint256 txid;
+    TxId txid;
     boost::signals2::scoped_connection c =
         wallet.NotifyTransactionChanged.connect(
-            [&txid](CWallet *, const uint256 &hash, ChangeType status) {
+            [&txid](CWallet *, const TxId &hash, ChangeType status) {
                 if (status == CT_NEW) {
                     txid = hash;
                 }
@@ -107,45 +107,46 @@ void TestGUI() {
         test.CreateAndProcessBlock(
             {}, GetScriptForRawPubKey(test.coinbaseKey.GetPubKey()));
     }
-    CWallet wallet(Params(), "mock", WalletDatabase::CreateMock());
+    std::shared_ptr<CWallet> wallet = std::make_shared<CWallet>(
+        Params(), "mock", WalletDatabase::CreateMock());
     bool firstRun;
-    wallet.LoadWallet(firstRun);
+    wallet->LoadWallet(firstRun);
     {
-        LOCK(wallet.cs_wallet);
-        wallet.SetAddressBook(
+        LOCK(wallet->cs_wallet);
+        wallet->SetAddressBook(
             GetDestinationForKey(test.coinbaseKey.GetPubKey(),
-                                 wallet.m_default_address_type),
+                                 wallet->m_default_address_type),
             "", "receive");
-        wallet.AddKeyPubKey(test.coinbaseKey, test.coinbaseKey.GetPubKey());
+        wallet->AddKeyPubKey(test.coinbaseKey, test.coinbaseKey.GetPubKey());
     }
     {
         LOCK(cs_main);
-        WalletRescanReserver reserver(&wallet);
+        WalletRescanReserver reserver(wallet.get());
         reserver.reserve();
-        wallet.ScanForWalletTransactions(chainActive.Genesis(), nullptr,
-                                         reserver, true);
+        wallet->ScanForWalletTransactions(chainActive.Genesis(), nullptr,
+                                          reserver, true);
     }
-    wallet.SetBroadcastTransactions(true);
+    wallet->SetBroadcastTransactions(true);
 
     // Create widgets for sending coins and listing transactions.
     std::unique_ptr<const PlatformStyle> platformStyle(
         PlatformStyle::instantiate("other"));
     auto node = interfaces::MakeNode();
     OptionsModel optionsModel(*node);
-    AddWallet(&wallet);
+    AddWallet(wallet);
     WalletModel walletModel(std::move(node->getWallets().back()), *node,
                             platformStyle.get(), &optionsModel);
-    RemoveWallet(&wallet);
+    RemoveWallet(wallet);
 
     // Send two transactions, and verify they are added to transaction list.
     SendCoinsDialog sendCoinsDialog(platformStyle.get(), &walletModel);
     TransactionTableModel *transactionTableModel =
         walletModel.getTransactionTableModel();
     QCOMPARE(transactionTableModel->rowCount({}), 105);
-    uint256 txid1 =
-        SendCoins(wallet, sendCoinsDialog, CTxDestination(CKeyID()), 5 * COIN);
-    uint256 txid2 =
-        SendCoins(wallet, sendCoinsDialog, CTxDestination(CKeyID()), 10 * COIN);
+    TxId txid1 = SendCoins(*wallet.get(), sendCoinsDialog,
+                           CTxDestination(CKeyID()), 5 * COIN);
+    TxId txid2 = SendCoins(*wallet.get(), sendCoinsDialog,
+                           CTxDestination(CKeyID()), 10 * COIN);
     QCOMPARE(transactionTableModel->rowCount({}), 107);
     QVERIFY(FindTx(*transactionTableModel, txid1).isValid());
     QVERIFY(FindTx(*transactionTableModel, txid2).isValid());

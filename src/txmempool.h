@@ -30,6 +30,8 @@
 class CBlockIndex;
 class Config;
 
+extern CCriticalSection cs_main;
+
 inline double AllowFreeThreshold() {
     return (144 * COIN) / (250 * SATOSHI);
 }
@@ -595,8 +597,9 @@ public:
         const CTransaction &tx,
         MemPoolRemovalReason reason = MemPoolRemovalReason::UNKNOWN);
     void removeForReorg(const Config &config, const CCoinsViewCache *pcoins,
-                        unsigned int nMemPoolHeight, int flags);
-    void removeConflicts(const CTransaction &tx);
+                        unsigned int nMemPoolHeight, int flags)
+        EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+    void removeConflicts(const CTransaction &tx) EXCLUSIVE_LOCKS_REQUIRED(cs);
     void removeForBlock(const std::vector<CTransactionRef> &vtx,
                         unsigned int nBlockHeight);
 
@@ -788,15 +791,16 @@ private:
 };
 
 /**
- * CCoinsView that brings transactions from a memorypool into view.
+ * CCoinsView that brings transactions from a mempool into view.
  * It does not check for spendings by memory pool transactions.
  * Instead, it provides access to all Coins which are either unspent in the
  * base CCoinsView, or are outputs from any mempool transaction!
  * This allows transaction replacement to work as expected, as you want to
  * have all inputs "available" to check signatures, and any cycles in the
  * dependency graph are checked directly in AcceptToMemoryPool.
- * It also allows you to sign a double-spend directly in signrawtransaction,
- * as long as the conflicting transaction is not yet confirmed.
+ * It also allows you to sign a double-spend directly in
+ * signrawtransactionwithkey and signrawtransactionwithwallet, as long as the
+ * conflicting transaction is not yet confirmed.
  */
 class CCoinsViewMemPool : public CCoinsViewBacked {
 protected:

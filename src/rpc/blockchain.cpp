@@ -22,8 +22,8 @@
 #include <sync.h>
 #include <txdb.h>
 #include <txmempool.h>
-#include <util.h>
-#include <utilstrencodings.h>
+#include <util/strencodings.h>
+#include <util/system.h>
 #include <validation.h>
 #include <validationinterface.h>
 #include <warnings.h>
@@ -826,7 +826,8 @@ static CBlock GetBlockChecked(const Config &config,
         throw JSONRPCError(RPC_MISC_ERROR, "Block not available (pruned data)");
     }
 
-    if (!ReadBlockFromDisk(block, pblockindex, config)) {
+    if (!ReadBlockFromDisk(block, pblockindex,
+                           config.GetChainParams().GetConsensus())) {
         // Block not found on disk. This could be because we have the block
         // header in our index but don't have the block (for example if a
         // non-whitelisted node sends us an unrequested long chain of valid
@@ -1065,7 +1066,7 @@ static UniValue pruneblockchain(const Config &config,
             "Blockchain is shorter than the attempted prune height.");
     } else if (height > chainHeight - MIN_BLOCKS_TO_KEEP) {
         LogPrint(BCLog::RPC, "Attempt to prune blocks close to the tip. "
-                             "Retaining the minimum number of blocks.");
+                             "Retaining the minimum number of blocks.\n");
         height = chainHeight - MIN_BLOCKS_TO_KEEP;
     }
 
@@ -1241,39 +1242,6 @@ static UniValue verifychain(const Config &config,
                                 nCheckDepth);
 }
 
-/** Implementation of IsSuperMajority with better feedback */
-static UniValue SoftForkMajorityDesc(int version, const CBlockIndex *pindex,
-                                     const Consensus::Params &consensusParams) {
-    UniValue rv(UniValue::VOBJ);
-    bool activated = false;
-    switch (version) {
-        case 2:
-            activated = pindex->nHeight >= consensusParams.BIP34Height;
-            break;
-        case 3:
-            activated = pindex->nHeight >= consensusParams.BIP66Height;
-            break;
-        case 4:
-            activated = pindex->nHeight >= consensusParams.BIP65Height;
-            break;
-        case 5:
-            activated = pindex->nHeight >= consensusParams.CSVHeight;
-            break;
-    }
-    rv.pushKV("status", activated);
-    return rv;
-}
-
-static UniValue SoftForkDesc(const std::string &name, int version,
-                             const CBlockIndex *pindex,
-                             const Consensus::Params &consensusParams) {
-    UniValue rv(UniValue::VOBJ);
-    rv.pushKV("id", name);
-    rv.pushKV("version", version);
-    rv.pushKV("reject", SoftForkMajorityDesc(version, pindex, consensusParams));
-    return rv;
-}
-
 UniValue getblockchaininfo(const Config &config,
                            const JSONRPCRequest &request) {
     if (request.fHelp || request.params.size() != 0) {
@@ -1281,11 +1249,6 @@ UniValue getblockchaininfo(const Config &config,
             "getblockchaininfo\n"
             "Returns an object containing various state info regarding "
             "blockchain processing.\n"
-            "DEPRECATION WARNING: The 'softforks' output has been deprecated "
-            "and will be\n"
-            "removed v0.20. For the time being it will only be shown here when "
-            "bitcoind\n"
-            "is started with -deprecatedrpc=getblockchaininfo.\n"
             "\nResult:\n"
             "{\n"
             "  \"chain\": \"xxxx\",              (string) current network name "
@@ -1316,18 +1279,6 @@ UniValue getblockchaininfo(const Config &config,
             "pruning is enabled (only present if pruning is enabled)\n"
             "  \"prune_target_size\": xxxxxx,  (numeric) the target size "
             "used by pruning (only present if automatic pruning is enabled)\n"
-            "  \"softforks\": [                (array) DEPRECATED: status of "
-            "softforks in progress\n"
-            "     {\n"
-            "        \"id\": \"xxxx\",           (string) name of softfork\n"
-            "        \"version\": xx,          (numeric) block version\n"
-            "        \"reject\": {             (object) progress toward "
-            "rejecting pre-softfork blocks\n"
-            "           \"status\": xx,        (boolean) true if threshold "
-            "reached\n"
-            "        },\n"
-            "     }, ...\n"
-            "  ]\n"
             "  \"warnings\" : \"...\",           (string) any network and "
             "blockchain warnings.\n"
             "}\n"
@@ -1368,17 +1319,6 @@ UniValue getblockchaininfo(const Config &config,
         if (automatic_pruning) {
             obj.pushKV("prune_target_size", nPruneTarget);
         }
-    }
-
-    if (IsDeprecatedRPCEnabled(gArgs, "getblockchaininfo")) {
-        const Consensus::Params &consensusParams =
-            config.GetChainParams().GetConsensus();
-        UniValue softforks(UniValue::VARR);
-        softforks.push_back(SoftForkDesc("bip34", 2, tip, consensusParams));
-        softforks.push_back(SoftForkDesc("bip66", 3, tip, consensusParams));
-        softforks.push_back(SoftForkDesc("bip65", 4, tip, consensusParams));
-        softforks.push_back(SoftForkDesc("csv", 5, tip, consensusParams));
-        obj.pushKV("softforks", softforks);
     }
 
     obj.pushKV("warnings", GetWarnings("statusbar"));
@@ -2084,6 +2024,8 @@ static UniValue getblockstats(const Config &config,
     std::vector<Amount> feerate_array;
     std::vector<int64_t> txsize_array;
 
+    const Consensus::Params &params = config.GetChainParams().GetConsensus();
+
     for (const auto &tx : block.vtx) {
         outputs += tx->vout.size();
         Amount tx_total_out = Amount::zero();
@@ -2118,17 +2060,17 @@ static UniValue getblockstats(const Config &config,
         }
 
         if (loop_inputs) {
-
             if (!g_txindex) {
                 throw JSONRPCError(RPC_INVALID_PARAMETER,
                                    "One or more of the selected stats requires "
                                    "-txindex enabled");
             }
+
             Amount tx_total_in = Amount::zero();
             for (const CTxIn &in : tx->vin) {
                 CTransactionRef tx_in;
                 uint256 hashBlock;
-                if (!GetTransaction(config, in.prevout.GetTxId(), tx_in,
+                if (!GetTransaction(params, in.prevout.GetTxId(), tx_in,
                                     hashBlock, false)) {
                     throw JSONRPCError(RPC_INTERNAL_ERROR,
                                        std::string("Unexpected internal error "

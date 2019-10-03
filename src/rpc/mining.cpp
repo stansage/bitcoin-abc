@@ -22,8 +22,8 @@
 #include <rpc/mining.h>
 #include <rpc/server.h>
 #include <txmempool.h>
-#include <util.h>
-#include <utilstrencodings.h>
+#include <util/strencodings.h>
+#include <util/system.h>
 #include <validation.h>
 #include <validationinterface.h>
 #include <warnings.h>
@@ -141,11 +141,13 @@ UniValue generateBlocks(const Config &config,
 
         {
             LOCK(cs_main);
-            IncrementExtraNonce(config, pblock, chainActive.Tip(), nExtraNonce);
+            IncrementExtraNonce(pblock, chainActive.Tip(),
+                                config.GetMaxBlockSize(), nExtraNonce);
         }
 
         while (nMaxTries > 0 && pblock->nNonce < nInnerLoopCount &&
-               !CheckProofOfWork(pblock->GetHash(), pblock->nBits, config)) {
+               !CheckProofOfWork(pblock->GetHash(), pblock->nBits,
+                                 config.GetChainParams().GetConsensus())) {
             ++pblock->nNonce;
             --nMaxTries;
         }
@@ -239,9 +241,6 @@ static UniValue getmininginfo(const Config &config,
             "defined in BIP70 (main, test, regtest)\n"
             "  \"warnings\": \"...\"          (string) any network and "
             "blockchain warnings\n"
-            "  \"errors\": \"...\"            (string) DEPRECATED. Same as "
-            "warnings. Only shown when bitcoind is started with "
-            "-deprecatedrpc=getmininginfo\n"
             "}\n"
             "\nExamples:\n" +
             HelpExampleCli("getmininginfo", "") +
@@ -261,11 +260,8 @@ static UniValue getmininginfo(const Config &config,
     obj.pushKV("networkhashps", getnetworkhashps(config, request));
     obj.pushKV("pooledtx", uint64_t(g_mempool.size()));
     obj.pushKV("chain", config.GetChainParams().NetworkIDString());
-    if (IsDeprecatedRPCEnabled(gArgs, "getmininginfo")) {
-        obj.pushKV("errors", GetWarnings("statusbar"));
-    } else {
-        obj.pushKV("warnings", GetWarnings("statusbar"));
-    }
+    obj.pushKV("warnings", GetWarnings("statusbar"));
+
     return obj;
 }
 
@@ -495,10 +491,10 @@ static UniValue getblocktemplate(const Config &config,
                 return "inconclusive-not-best-prevblk";
             }
             CValidationState state;
-            BlockValidationOptions validationOptions =
-                BlockValidationOptions(false, true);
-            TestBlockValidity(config, state, block, pindexPrev,
-                              validationOptions);
+            TestBlockValidity(state, config.GetChainParams(), block, pindexPrev,
+                              BlockValidationOptions(config)
+                                  .withCheckPoW(false)
+                                  .withCheckMerkleRoot(true));
             return BIP22ValidationResult(config, state);
         }
     }
@@ -606,7 +602,7 @@ static UniValue getblocktemplate(const Config &config,
     CBlock *pblock = &pblocktemplate->block;
 
     // Update nTime
-    UpdateTime(pblock, config, pindexPrev);
+    UpdateTime(pblock, config.GetChainParams().GetConsensus(), pindexPrev);
     pblock->nNonce = 0;
 
     UniValue aCaps(UniValue::VARR);
@@ -726,7 +722,6 @@ static UniValue submitblock(const Config &config,
     }
 
     uint256 hash = block.GetHash();
-    bool fBlockPresent = false;
     {
         LOCK(cs_main);
         const CBlockIndex *pindex = LookupBlockIndex(hash);
@@ -737,20 +732,17 @@ static UniValue submitblock(const Config &config,
             if (pindex->nStatus.isInvalid()) {
                 return "duplicate-invalid";
             }
-            // Otherwise, we might only have the header - process the block
-            // before returning
-            fBlockPresent = true;
         }
     }
 
+    bool new_block;
     submitblock_StateCatcher sc(block.GetHash());
     RegisterValidationInterface(&sc);
-    bool fAccepted = ProcessNewBlock(config, blockptr, true, nullptr);
+    bool accepted =
+        ProcessNewBlock(config, blockptr, /* fForceProcessing */ true,
+                        /* fNewBlock */ &new_block);
     UnregisterValidationInterface(&sc);
-    if (fBlockPresent) {
-        if (fAccepted && !sc.found) {
-            return "duplicate-inconclusive";
-        }
+    if (!new_block && accepted) {
         return "duplicate";
     }
 
@@ -761,9 +753,52 @@ static UniValue submitblock(const Config &config,
     return BIP22ValidationResult(config, sc.state);
 }
 
+static UniValue submitheader(const Config &config,
+                             const JSONRPCRequest &request) {
+    if (request.fHelp || request.params.size() != 1) {
+        throw std::runtime_error("submitheader \"hexdata\"\n"
+                                 "\nDecode the given hexdata as a header and "
+                                 "submit it as a candidate chain tip if valid."
+                                 "\nThrows when the header is invalid.\n"
+                                 "\nArguments\n"
+                                 "1. \"hexdata\"        (string, required) the "
+                                 "hex-encoded block header data\n"
+                                 "\nResult:\n"
+                                 "None"
+                                 "\nExamples:\n" +
+                                 HelpExampleCli("submitheader", "\"aabbcc\"") +
+                                 HelpExampleRpc("submitheader", "\"aabbcc\""));
+    }
+
+    CBlockHeader h;
+    if (!DecodeHexBlockHeader(h, request.params[0].get_str())) {
+        throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+                           "Block header decode failed");
+    }
+    {
+        LOCK(cs_main);
+        if (!LookupBlockIndex(h.hashPrevBlock)) {
+            throw JSONRPCError(RPC_VERIFY_ERROR,
+                               "Must submit previous header (" +
+                                   h.hashPrevBlock.GetHex() + ") first");
+        }
+    }
+
+    CValidationState state;
+    ProcessNewBlockHeaders(config, {h}, state, /* ppindex */ nullptr,
+                           /* first_invalid */ nullptr);
+    if (state.IsValid()) {
+        return NullUniValue;
+    }
+    if (state.IsError()) {
+        throw JSONRPCError(RPC_VERIFY_ERROR, FormatStateMessage(state));
+    }
+    throw JSONRPCError(RPC_VERIFY_ERROR, state.GetRejectReason());
+}
+
 static UniValue estimatefee(const Config &config,
                             const JSONRPCRequest &request) {
-    if (request.fHelp || request.params.size() > 1) {
+    if (request.fHelp || request.params.size() > 0) {
         throw std::runtime_error(
             "estimatefee\n"
             "\nEstimates the approximate fee per kilobyte needed for a "
@@ -772,17 +807,6 @@ static UniValue estimatefee(const Config &config,
             "n              (numeric) estimated fee-per-kilobyte\n"
             "\nExample:\n" +
             HelpExampleCli("estimatefee", ""));
-    }
-
-    if ((request.params.size() == 1) &&
-        !IsDeprecatedRPCEnabled(gArgs, "estimatefee")) {
-        // FIXME: Remove this message in 0.20
-        throw JSONRPCError(
-            RPC_METHOD_DEPRECATED,
-            "estimatefee with the nblocks argument is no longer supported\n"
-            "Please call estimatefee with no arguments instead.\n"
-            "\nExample:\n" +
-                HelpExampleCli("estimatefee", ""));
     }
 
     return ValueFromAmount(g_mempool.estimateFee().GetFeePerK());
@@ -797,6 +821,7 @@ static const ContextFreeRPCCommand commands[] = {
     {"mining",     "prioritisetransaction", prioritisetransaction, {"txid", "priority_delta", "fee_delta"}},
     {"mining",     "getblocktemplate",      getblocktemplate,      {"template_request"}},
     {"mining",     "submitblock",           submitblock,           {"hexdata", "dummy"}},
+    {"mining",     "submitheader",          submitheader,          {"hexdata"}},
 
     {"generating", "generatetoaddress",     generatetoaddress,     {"nblocks", "address", "maxtries"}},
 

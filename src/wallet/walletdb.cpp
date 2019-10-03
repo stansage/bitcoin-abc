@@ -14,8 +14,8 @@
 #include <protocol.h>
 #include <serialize.h>
 #include <sync.h>
-#include <util.h>
-#include <utiltime.h>
+#include <util/system.h>
+#include <util/time.h>
 #include <wallet/wallet.h>
 
 #include <atomic>
@@ -253,26 +253,23 @@ void WalletBatch::ListAccountCreditDebit(const std::string &strAccount,
 
 class CWalletScanState {
 public:
-    unsigned int nKeys;
-    unsigned int nCKeys;
-    unsigned int nWatchKeys;
-    unsigned int nKeyMeta;
-    bool fIsEncrypted;
-    bool fAnyUnordered;
-    int nFileVersion;
+    unsigned int nKeys{0};
+    unsigned int nCKeys{0};
+    unsigned int nWatchKeys{0};
+    unsigned int nKeyMeta{0};
+    unsigned int m_unknown_records{0};
+    bool fIsEncrypted{false};
+    bool fAnyUnordered{false};
+    int nFileVersion{0};
     std::vector<TxId> vWalletUpgrade;
 
-    CWalletScanState() {
-        nKeys = nCKeys = nWatchKeys = nKeyMeta = 0;
-        fIsEncrypted = false;
-        fAnyUnordered = false;
-        nFileVersion = 0;
-    }
+    CWalletScanState() {}
 };
 
 static bool ReadKeyValue(CWallet *pwallet, CDataStream &ssKey,
                          CDataStream &ssValue, CWalletScanState &wss,
-                         std::string &strType, std::string &strErr) {
+                         std::string &strType, std::string &strErr)
+    EXCLUSIVE_LOCKS_REQUIRED(pwallet->cs_wallet) {
     try {
         // Unserialize
         // Taking advantage of the fact that pair serialization is just the two
@@ -510,6 +507,8 @@ static bool ReadKeyValue(CWallet *pwallet, CDataStream &ssKey,
                 strErr = "Error reading wallet database: SetHDChain failed";
                 return false;
             }
+        } else if (strType != "bestblock" && strType != "bestblock_nomerkle") {
+            wss.m_unknown_records++;
         }
     } catch (...) {
         return false;
@@ -599,8 +598,10 @@ DBErrors WalletBatch::LoadWallet(CWallet *pwallet) {
 
     LogPrintf("nFileVersion = %d\n", wss.nFileVersion);
 
-    LogPrintf("Keys: %u plaintext, %u encrypted, %u w/ metadata, %u total\n",
-              wss.nKeys, wss.nCKeys, wss.nKeyMeta, wss.nKeys + wss.nCKeys);
+    LogPrintf("Keys: %u plaintext, %u encrypted, %u w/ metadata, %u total. "
+              "Unknown wallet records: %u\n",
+              wss.nKeys, wss.nCKeys, wss.nKeyMeta, wss.nKeys + wss.nCKeys,
+              wss.m_unknown_records);
 
     // nTimeFirstKey is only reliable if all keys have metadata
     if ((wss.nKeys + wss.nCKeys + wss.nWatchKeys) != wss.nKeyMeta) {
@@ -761,7 +762,7 @@ void MaybeCompactWalletDB() {
         return;
     }
 
-    for (CWallet *pwallet : GetWallets()) {
+    for (const std::shared_ptr<CWallet> &pwallet : GetWallets()) {
         WalletDatabase &dbh = pwallet->GetDBHandle();
 
         unsigned int nUpdateCounter = dbh.nUpdateCounter;

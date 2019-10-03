@@ -9,8 +9,8 @@
 #include <script/script.h>
 #include <serialize.h>
 #include <streams.h>
-#include <util.h>
-#include <utilstrencodings.h>
+#include <util/strencodings.h>
+#include <util/system.h>
 #include <version.h>
 
 #include <test/data/sighash.json.h>
@@ -35,7 +35,7 @@ static uint256 SignatureHashOld(CScript scriptCode, const CTransaction &txTo,
 
     // In case concatenating two scripts ends up with two codeseparators, or an
     // extra one at the end, this prevents all those possible incompatibilities.
-    scriptCode.FindAndDelete(CScript(OP_CODESEPARATOR));
+    FindAndDelete(scriptCode, CScript(OP_CODESEPARATOR));
 
     // Blank out other inputs' signatures
     for (auto &in : txTmp.vin) {

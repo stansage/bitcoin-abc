@@ -18,8 +18,8 @@
 #include <script/sign.h>
 #include <script/standard.h>
 #include <streams.h>
-#include <util.h>
-#include <utilstrencodings.h>
+#include <util/strencodings.h>
+#include <util/system.h>
 #include <validation.h>
 
 #include <test/data/tx_invalid.json.h>
@@ -470,8 +470,8 @@ BOOST_AUTO_TEST_CASE(test_big_transaction) {
     CCheckQueueControl<CScriptCheck> control(&scriptcheckqueue);
 
     for (int i = 0; i < 20; i++) {
-        threadGroup.create_thread(boost::bind(
-            &CCheckQueue<CScriptCheck>::Thread, boost::ref(scriptcheckqueue)));
+        threadGroup.create_thread(std::bind(&CCheckQueue<CScriptCheck>::Thread,
+                                            std::ref(scriptcheckqueue)));
     }
 
     std::vector<Coin> coins;
@@ -537,7 +537,6 @@ BOOST_AUTO_TEST_CASE(test_witness) {
 
     CTransactionRef output1, output2;
     CMutableTransaction input1, input2;
-    SignatureData sigdata;
 
     // Normal pay-to-compressed-pubkey.
     CreateCreditAndSpend(keystore, scriptPubkey1, output1, input1);
@@ -786,17 +785,18 @@ BOOST_AUTO_TEST_CASE(test_IsStandard) {
 
 BOOST_AUTO_TEST_CASE(txsize_activation_test) {
     const Config &config = GetConfig();
+    const Consensus::Params &params = config.GetChainParams().GetConsensus();
     const int32_t magneticAnomalyActivationHeight =
-        config.GetChainParams().GetConsensus().magneticAnomalyHeight;
+        params.magneticAnomalyHeight;
 
     // A minimaly sized transction.
     CTransaction minTx;
     CValidationState state;
 
     BOOST_CHECK(ContextualCheckTransaction(
-        config, minTx, state, magneticAnomalyActivationHeight - 1, 5678, 1234));
+        params, minTx, state, magneticAnomalyActivationHeight - 1, 5678, 1234));
     BOOST_CHECK(!ContextualCheckTransaction(
-        config, minTx, state, magneticAnomalyActivationHeight, 5678, 1234));
+        params, minTx, state, magneticAnomalyActivationHeight, 5678, 1234));
     BOOST_CHECK_EQUAL(state.GetRejectCode(), REJECT_INVALID);
     BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txns-undersize");
 }

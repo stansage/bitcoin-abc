@@ -16,7 +16,7 @@
 #include <streams.h>
 #include <sync.h>
 #include <txmempool.h>
-#include <utilstrencodings.h>
+#include <util/strencodings.h>
 #include <validation.h>
 #include <version.h>
 
@@ -241,7 +241,8 @@ static bool rest_block(const Config &config, HTTPRequest *req,
                            hashStr + " not available (pruned data)");
         }
 
-        if (!ReadBlockFromDisk(block, pblockindex, config)) {
+        if (!ReadBlockFromDisk(block, pblockindex,
+                               config.GetChainParams().GetConsensus())) {
             return RESTERR(req, HTTP_NOT_FOUND, hashStr + " not found");
         }
     }
@@ -390,7 +391,8 @@ static bool rest_tx(Config &config, HTTPRequest *req,
 
     CTransactionRef tx;
     uint256 hashBlock = uint256();
-    if (!GetTransaction(config, txid, tx, hashBlock, true)) {
+    if (!GetTransaction(config.GetChainParams().GetConsensus(), txid, tx,
+                        hashBlock, true)) {
         return RESTERR(req, HTTP_NOT_FOUND, hashStr + " not found");
     }
 
@@ -467,9 +469,9 @@ static bool rest_getutxos(Config &config, HTTPRequest *req,
 
         for (size_t i = (fCheckMemPool) ? 1 : 0; i < uriParts.size(); i++) {
             int32_t nOutput;
-            std::string strTxid = uriParts[i].substr(0, uriParts[i].find("-"));
+            std::string strTxid = uriParts[i].substr(0, uriParts[i].find('-'));
             std::string strOutput =
-                uriParts[i].substr(uriParts[i].find("-") + 1);
+                uriParts[i].substr(uriParts[i].find('-') + 1);
 
             if (!ParseInt32(strOutput, &nOutput) || !IsHex(strTxid)) {
                 return RESTERR(req, HTTP_BAD_REQUEST, "Parse error");

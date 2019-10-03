@@ -83,7 +83,7 @@ public:
     ~Logger();
 
     /** Send a string to the log output */
-    int LogPrintStr(const std::string &str);
+    void LogPrintStr(const std::string &str);
 
     fs::path GetDebugLogPath();
     bool OpenDebugLog();
@@ -118,7 +118,7 @@ bool GetLogCategory(BCLog::LogFlags &flag, const std::string &str);
 
 // Be conservative when using LogPrintf/error or other things which
 // unconditionally log to debug.log! It should not be the case that an inbound
-// peer can fill up a users disk with debug.log entries.
+// peer can fill up a user's disk with debug.log entries.
 
 static inline void MarkUsed() {}
 template <typename T, typename... Args>
@@ -149,5 +149,13 @@ static inline void MarkUsed(const T &t, const Args &... args) {
         GetLogger().LogPrintStr(tfm::format(__VA_ARGS__));                     \
     } while (0)
 #endif
+
+/**
+ * These are aliases used to explicitly state that the message should not end
+ * with a newline character. It allows for detecting the missing newlines that
+ * could make the logs hard to read.
+ */
+#define LogPrintfToBeContinued LogPrintf
+#define LogPrintToBeContinued LogPrint
 
 #endif // BITCOIN_LOGGING_H

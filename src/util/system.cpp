@@ -8,14 +8,14 @@
 #endif
 
 #include <fs.h>
-#include <util.h>
+#include <util/system.h>
 
 #include <chainparamsbase.h>
 #include <fs.h>
 #include <random.h>
 #include <serialize.h>
-#include <utilstrencodings.h>
-#include <utiltime.h>
+#include <util/strencodings.h>
+#include <util/time.h>
 
 #include <boost/interprocess/sync/file_lock.hpp>
 #include <boost/thread.hpp>
@@ -994,6 +994,15 @@ bool ArgsManager::ReadConfigFiles(std::string &error,
                                    includeconf_net.end());
             }
 
+            // Remove -includeconf from configuration, so we can warn about
+            // recursion later
+            {
+                LOCK(cs_args);
+                m_config_args.erase("-includeconf");
+                m_config_args.erase(std::string("-") + GetChainName() +
+                                    ".includeconf");
+            }
+
             for (const std::string &to_include : includeconf) {
                 fs::ifstream include_config(GetConfigFile(to_include));
                 if (include_config.good()) {
@@ -1007,6 +1016,21 @@ bool ArgsManager::ReadConfigFiles(std::string &error,
                     fprintf(stderr, "Failed to include configuration file %s\n",
                             to_include.c_str());
                 }
+            }
+
+            // Warn about recursive -includeconf
+            includeconf = GetArgs("-includeconf");
+            {
+                std::vector<std::string> includeconf_net(GetArgs(
+                    std::string("-") + GetChainName() + ".includeconf"));
+                includeconf.insert(includeconf.end(), includeconf_net.begin(),
+                                   includeconf_net.end());
+            }
+            for (const std::string &to_include : includeconf) {
+                fprintf(stderr,
+                        "warning: -includeconf cannot be used from included "
+                        "files; ignoring -includeconf=%s\n",
+                        to_include.c_str());
             }
         }
     }
@@ -1188,7 +1212,9 @@ void AllocateFileRange(FILE *file, unsigned int offset, unsigned int length) {
     // Fallback version
     // TODO: just write one byte per block
     static const char buf[65536] = {};
-    fseek(file, offset, SEEK_SET);
+    if (fseek(file, offset, SEEK_SET)) {
+        return;
+    }
     while (length > 0) {
         unsigned int now = 65536;
         if (length < now) {
@@ -1315,7 +1341,7 @@ fs::path AbsPathForConfigVal(const fs::path &path, bool net_specific) {
 
 int ScheduleBatchPriority() {
 #ifdef SCHED_BATCH
-    const static sched_param param{0};
+    const static sched_param param{};
     if (int ret = pthread_setschedparam(pthread_self(), SCHED_BATCH, &param)) {
         LogPrintf("Failed to pthread_setschedparam: %s\n", strerror(errno));
         return ret;
